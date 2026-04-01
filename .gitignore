@@ -1,0 +1,6 @@
+node_modules/
+.env
+.env.*
+plan.md
+pnpm-lock.yaml
+pnpm-workspace.yaml

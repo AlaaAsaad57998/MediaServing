@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MediaServing — Test Panel</title>
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        font-family: system-ui, sans-serif;
+        background: #0f172a;
+        color: #e2e8f0;
+        padding: 2rem;
+      }
+      h1 {
+        font-size: 1.5rem;
+        margin-bottom: 1.5rem;
+        color: #38bdf8;
+      }
+      h2 {
+        font-size: 1.1rem;
+        margin-bottom: 1rem;
+        color: #94a3b8;
+        border-bottom: 1px solid #1e293b;
+        padding-bottom: 0.5rem;
+      }
+      .container {
+        max-width: 900px;
+        margin: 0 auto;
+      }
+      .card {
+        background: #1e293b;
+        border-radius: 8px;
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+      }
+      label {
+        display: block;
+        font-size: 0.85rem;
+        color: #94a3b8;
+        margin-bottom: 0.3rem;
+      }
+      input,
+      select {
+        width: 100%;
+        padding: 0.5rem;
+        border: 1px solid #334155;
+        border-radius: 4px;
+        background: #0f172a;
+        color: #e2e8f0;
+        font-size: 0.9rem;
+        margin-bottom: 0.8rem;
+      }
+      input[type="file"] {
+        padding: 0.4rem;
+      }
+      .row {
+        display: flex;
+        gap: 0.8rem;
+        flex-wrap: wrap;
+      }
+      .row > div {
+        flex: 1;
+        min-width: 120px;
+      }
+      button {
+        background: #2563eb;
+        color: #fff;
+        border: none;
+        padding: 0.6rem 1.5rem;
+        border-radius: 4px;
+        font-size: 0.9rem;
+        cursor: pointer;
+        margin-top: 0.5rem;
+      }
+      button:hover {
+        background: #1d4ed8;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .result {
+        margin-top: 1rem;
+        padding: 1rem;
+        background: #0f172a;
+        border-radius: 4px;
+        font-family: monospace;
+        font-size: 0.85rem;
+        white-space: pre-wrap;
+        word-break: break-all;
+        max-height: 200px;
+        overflow-y: auto;
+        display: none;
+      }
+      .result.show {
+        display: block;
+      }
+      .result.error {
+        border-left: 3px solid #ef4444;
+      }
+      .result.success {
+        border-left: 3px solid #22c55e;
+      }
+      .preview {
+        margin-top: 1rem;
+        text-align: center;
+        display: none;
+      }
+      .preview.show {
+        display: block;
+      }
+      .preview img {
+        max-width: 100%;
+        max-height: 400px;
+        border-radius: 4px;
+        border: 1px solid #334155;
+      }
+      .preview .meta {
+        font-size: 0.8rem;
+        color: #64748b;
+        margin-top: 0.5rem;
+      }
+      .api-key-bar {
+        display: flex;
+        gap: 0.8rem;
+        align-items: end;
+        margin-bottom: 1.5rem;
+      }
+      .api-key-bar > div {
+        flex: 1;
+      }
+      .api-key-bar label {
+        margin-bottom: 0.3rem;
+      }
+      .api-key-bar input {
+        margin-bottom: 0;
+      }
+      .status {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        margin-right: 0.4rem;
+      }
+      .status.green {
+        background: #22c55e;
+      }
+      .status.red {
+        background: #ef4444;
+      }
+      .health-check {
+        font-size: 0.85rem;
+        color: #64748b;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>MediaServing — Test Panel</h1>
+
+      <!-- API Key + Health -->
+      <div class="card">
+        <div class="api-key-bar">
+          <div style="flex: 2">
+            <label for="apiKey">API Key (X-API-Key)</label>
+            <input
+              type="text"
+              id="apiKey"
+              value="changeme-generate-a-strong-key"
+              placeholder="Enter your API key"
+            />
+          </div>
+          <div style="flex: 1">
+            <label for="baseUrl">Base URL</label>
+            <input
+              type="text"
+              id="baseUrl"
+              value="http://localhost:3000"
+              placeholder="http://localhost:3000"
+            />
+          </div>
+          <div style="flex: 0">
+            <button onclick="checkHealth()">Health</button>
+          </div>
+        </div>
+        <div class="health-check" id="healthResult"></div>
+      </div>
+
+      <!-- Upload Section -->
+      <div class="card">
+        <h2>Upload Image</h2>
+        <div class="row">
+          <div style="flex: 2">
+            <label for="uploadFile">Image File</label>
+            <input type="file" id="uploadFile" accept="image/*" />
+          </div>
+          <div style="flex: 1">
+            <label for="uploadFolder">Folder (optional)</label>
+            <input type="text" id="uploadFolder" placeholder="e.g. avatars" />
+          </div>
+        </div>
+        <button id="uploadBtn" onclick="uploadFile()">Upload</button>
+        <div class="result" id="uploadResult"></div>
+      </div>
+
+      <!-- Transform Section -->
+      <div class="card">
+        <h2>Transform & View Image</h2>
+        <div>
+          <label for="filePath">File Path (without originals/ prefix)</label>
+          <input
+            type="text"
+            id="filePath"
+            placeholder="e.g. photo.jpg or avatars/photo.jpg"
+          />
+        </div>
+        <div class="row">
+          <div>
+            <label for="paramW">Width (w)</label>
+            <input
+              type="number"
+              id="paramW"
+              placeholder="300"
+              min="1"
+              max="10000"
+            />
+          </div>
+          <div>
+            <label for="paramH">Height (h)</label>
+            <input
+              type="number"
+              id="paramH"
+              placeholder="300"
+              min="1"
+              max="10000"
+            />
+          </div>
+          <div>
+            <label for="paramQ">Quality (q)</label>
+            <input
+              type="number"
+              id="paramQ"
+              placeholder="80"
+              min="1"
+              max="100"
+            />
+          </div>
+          <div>
+            <label for="paramF">Format (f)</label>
+            <select id="paramF">
+              <option value="">— original —</option>
+              <option value="webp" selected>webp</option>
+              <option value="jpeg">jpeg</option>
+              <option value="png">png</option>
+              <option value="avif">avif</option>
+            </select>
+          </div>
+          <div>
+            <label for="paramC">Fit (c)</label>
+            <select id="paramC">
+              <option value="">— default —</option>
+              <option value="cover">cover</option>
+              <option value="contain">contain</option>
+              <option value="fill">fill</option>
+              <option value="inside">inside</option>
+              <option value="outside">outside</option>
+            </select>
+          </div>
+        </div>
+        <div style="margin-top: 0.5rem">
+          <label><input type="checkbox" id="paramLossy" /> fl_lossy</label>
+        </div>
+        <div style="margin-top: 0.8rem; font-size: 0.85rem; color: #64748b">
+          URL: <span id="transformUrl" style="color: #38bdf8">—</span>
+        </div>
+        <button
+          id="transformBtn"
+          onclick="transformImage()"
+          style="margin-top: 0.8rem"
+        >
+          Transform & View
+        </button>
+        <div class="result" id="transformResult"></div>
+        <div class="preview" id="transformPreview">
+          <img id="previewImg" alt="Transformed image" />
+          <div class="meta" id="previewMeta"></div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      function getBase() {
+        return document.getElementById("baseUrl").value.replace(/\/+$/, "");
+      }
+      function getKey() {
+        return document.getElementById("apiKey").value;
+      }
+
+      // Build transformation string from form inputs
+      function buildTransformations() {
+        const parts = [];
+        const w = document.getElementById("paramW").value;
+        const h = document.getElementById("paramH").value;
+        const q = document.getElementById("paramQ").value;
+        const f = document.getElementById("paramF").value;
+        const c = document.getElementById("paramC").value;
+        const lossy = document.getElementById("paramLossy").checked;
+        if (w) parts.push("w_" + w);
+        if (h) parts.push("h_" + h);
+        if (q) parts.push("q_" + q);
+        if (f) parts.push("f_" + f);
+        if (c) parts.push("c_" + c);
+        if (lossy) parts.push("fl_lossy");
+        return parts.join(",");
+      }
+
+      // Update URL preview on input change
+      function updateUrlPreview() {
+        const t = buildTransformations();
+        const fp = document.getElementById("filePath").value;
+        if (fp) {
+          const url = t
+            ? getBase() + "/media/upload/" + t + "/" + fp
+            : getBase() + "/media/upload/" + fp;
+          document.getElementById("transformUrl").textContent = url;
+        } else {
+          document.getElementById("transformUrl").textContent = "—";
+        }
+      }
+      document
+        .querySelectorAll(
+          "#filePath, #paramW, #paramH, #paramQ, #paramF, #paramC, #paramLossy",
+        )
+        .forEach((el) => {
+          el.addEventListener("input", updateUrlPreview);
+          el.addEventListener("change", updateUrlPreview);
+        });
+
+      function showResult(id, text, isError) {
+        const el = document.getElementById(id);
+        el.textContent = text;
+        el.className = "result show " + (isError ? "error" : "success");
+      }
+
+      async function checkHealth() {
+        const el = document.getElementById("healthResult");
+        try {
+          const res = await fetch(getBase() + "/health");
+          const data = await res.json();
+          el.innerHTML =
+            '<span class="status green"></span> Connected — ' +
+            JSON.stringify(data);
+        } catch (e) {
+          el.innerHTML =
+            '<span class="status red"></span> Cannot reach server: ' +
+            e.message;
+        }
+      }
+
+      async function uploadFile() {
+        const fileInput = document.getElementById("uploadFile");
+        const folder = document.getElementById("uploadFolder").value.trim();
+        const btn = document.getElementById("uploadBtn");
+
+        if (!fileInput.files.length) {
+          showResult("uploadResult", "Please select a file", true);
+          return;
+        }
+
+        const form = new FormData();
+        form.append("file", fileInput.files[0]);
+        if (folder) form.append("folder", folder);
+
+        btn.disabled = true;
+        btn.textContent = "Uploading...";
+        try {
+          const res = await fetch(getBase() + "/upload", {
+            method: "POST",
+            headers: { "X-API-Key": getKey() },
+            body: form,
+          });
+          const data = await res.json();
+          if (res.ok) {
+            showResult(
+              "uploadResult",
+              "Status: " + res.status + "\n" + JSON.stringify(data, null, 2),
+              false,
+            );
+            // Auto-fill transform path
+            const relativePath = data.key.replace(/^originals\//, "");
+            document.getElementById("filePath").value = relativePath;
+            updateUrlPreview();
+          } else {
+            showResult(
+              "uploadResult",
+              "Status: " + res.status + "\n" + JSON.stringify(data, null, 2),
+              true,
+            );
+          }
+        } catch (e) {
+          showResult("uploadResult", "Error: " + e.message, true);
+        } finally {
+          btn.disabled = false;
+          btn.textContent = "Upload";
+        }
+      }
+
+      async function transformImage() {
+        const fp = document.getElementById("filePath").value.trim();
+        const t = buildTransformations();
+        const btn = document.getElementById("transformBtn");
+
+        if (!fp) {
+          showResult("transformResult", "Enter a file path first", true);
+          return;
+        }
+
+        const url = t
+          ? getBase() + "/media/upload/" + t + "/" + fp
+          : getBase() + "/media/upload/" + fp;
+        btn.disabled = true;
+        btn.textContent = t ? "Processing..." : "Fetching Original...";
+        try {
+          const res = await fetch(url, {
+            headers: { "X-API-Key": getKey() },
+          });
+
+          if (!res.ok) {
+            const data = await res.json();
+            showResult(
+              "transformResult",
+              "Status: " + res.status + "\n" + JSON.stringify(data, null, 2),
+              true,
+            );
+            document.getElementById("transformPreview").className = "preview";
+            return;
+          }
+
+          const cacheStatus = res.headers.get("X-Cache") || "unknown";
+          const contentType = res.headers.get("Content-Type") || "unknown";
+          const blob = await res.blob();
+
+          showResult(
+            "transformResult",
+            "Status: " +
+              res.status +
+              " | Cache: " +
+              cacheStatus +
+              " | Type: " +
+              contentType +
+              " | Size: " +
+              (blob.size / 1024).toFixed(1) +
+              " KB",
+            false,
+          );
+
+          const imgUrl = URL.createObjectURL(blob);
+          const previewImg = document.getElementById("previewImg");
+          previewImg.onload = function () {
+            document.getElementById("previewMeta").textContent =
+              this.naturalWidth +
+              "×" +
+              this.naturalHeight +
+              " | " +
+              contentType +
+              " | " +
+              (blob.size / 1024).toFixed(1) +
+              " KB | Cache: " +
+              cacheStatus;
+          };
+          previewImg.src = imgUrl;
+          document.getElementById("transformPreview").className =
+            "preview show";
+        } catch (e) {
+          showResult("transformResult", "Error: " + e.message, true);
+          document.getElementById("transformPreview").className = "preview";
+        } finally {
+          btn.disabled = false;
+          btn.textContent = "Transform & View";
+        }
+      }
+
+      // Initial health check
+      checkHealth();
+    </script>
+  </body>
+</html>
