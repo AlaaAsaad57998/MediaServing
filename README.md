@@ -18,16 +18,16 @@ No third-party image services, no per-image fees, no data leaving your infrastru
 
 ## Features
 
-| Feature                   | Details                                                               |
-| ------------------------- | --------------------------------------------------------------------- |
-| **Image upload**          | Upload JPEG, PNG, WebP, or AVIF images via a simple HTTP POST         |
-| **On-the-fly transforms** | Resize, crop, convert format, adjust quality — all via URL parameters |
-| **Smart caching**         | Transformed results are stored and served without re-processing       |
-| **Distributed locking**   | Prevents duplicate work when multiple requests arrive simultaneously  |
-| **API key auth**          | All endpoints (except health check) require an `X-API-Key` header     |
-| **Rate limiting**         | Per-key and per-IP limits protect the service from abuse              |
-| **CORS support**          | Configurable allowed origins for browser-based clients                |
-| **Health check**          | `/health` endpoint — no auth required, useful for uptime monitoring   |
+| Feature                   | Details                                                                      |
+| ------------------------- | ---------------------------------------------------------------------------- |
+| **Image upload**          | Upload JPEG, PNG, WebP, or AVIF images via a simple HTTP POST                |
+| **On-the-fly transforms** | Resize, crop, convert format, adjust quality — all via URL parameters        |
+| **Smart caching**         | Transformed results are stored and served without re-processing              |
+| **Distributed locking**   | Prevents duplicate work when multiple requests arrive simultaneously         |
+| **API key auth**          | Only `POST /upload` requires an `X-API-Key` header — image serving is public |
+| **Rate limiting**         | Per-key and per-IP limits protect the service from abuse                     |
+| **CORS support**          | Configurable allowed origins for browser-based clients                       |
+| **Health check**          | `/health` endpoint — no auth required, useful for uptime monitoring          |
 
 ---
 
@@ -81,13 +81,25 @@ MediaServing/
 
 ### Authentication
 
-All endpoints except `/health` require an `X-API-Key` header:
+Only **`POST /upload`** requires authentication. Image serving and the health check are fully public.
+
+Protected endpoints require an `X-API-Key` header:
 
 ```
 X-API-Key: your-secret-api-key
 ```
 
-Missing or incorrect key → `401 Unauthorized`.
+Missing or incorrect key on a protected endpoint → `401 Unauthorized`.
+
+**Public routes (no key needed):**
+
+- `GET /health`
+- `GET /media/upload/...` — all image serving and transform URLs
+- `GET /test`, `GET /test.html`
+
+**Protected routes (API key required):**
+
+- `POST /upload`
 
 ---
 
@@ -142,6 +154,8 @@ curl -X POST http://localhost:3000/upload \
 ---
 
 ### `GET /media/upload/:transformations/*`
+
+> **No authentication required.** This endpoint is fully public — browsers, `<img>` tags, and CDNs can fetch images directly without an API key.
 
 Fetch an image with on-the-fly transformations applied. On the first request, the image is processed and cached. All subsequent identical requests are served from the cache.
 
@@ -251,9 +265,9 @@ All configuration lives in `.env.development` (local) or `.env.production` (prod
 
 ### Authentication
 
-| Variable  | Description                                                                                     |
-| --------- | ----------------------------------------------------------------------------------------------- |
-| `API_KEY` | Required. A strong secret string. All API requests must include this in the `X-API-Key` header. |
+| Variable  | Description                                                                                            |
+| --------- | ------------------------------------------------------------------------------------------------------ |
+| `API_KEY` | Required. A strong secret string. Must be sent via the `X-API-Key` header when calling `POST /upload`. |
 
 ### Rate Limiting
 
