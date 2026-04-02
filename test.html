@@ -157,6 +157,11 @@
         font-size: 0.85rem;
         color: #64748b;
       }
+      .config-note {
+        font-size: 0.82rem;
+        color: #94a3b8;
+        margin-top: 0.5rem;
+      }
     </style>
   </head>
   <body>
@@ -166,28 +171,17 @@
       <!-- API Key + Health -->
       <div class="card">
         <div class="api-key-bar">
-          <div style="flex: 2">
-            <label for="apiKey">API Key (X-API-Key)</label>
-            <input
-              type="text"
-              id="apiKey"
-              value="changeme-generate-a-strong-key"
-              placeholder="Enter your API key"
-            />
-          </div>
           <div style="flex: 1">
-            <label for="baseUrl">Base URL</label>
-            <input
-              type="text"
-              id="baseUrl"
-              value="http://localhost:3000"
-              placeholder="http://localhost:3000"
-            />
+            <label>Base URL (auto)</label>
+            <div id="baseUrl" style="padding: 0.5rem; font-size: 0.9rem">
+              -
+            </div>
           </div>
           <div style="flex: 0">
             <button onclick="checkHealth()">Health</button>
           </div>
         </div>
+        <div class="config-note" id="apiKeyStatus"></div>
         <div class="health-check" id="healthResult"></div>
       </div>
 
@@ -294,11 +288,14 @@
     </div>
 
     <script>
+      window.__TEST_API_KEY__ = "__TEST_API_KEY__";
+
       function getBase() {
-        return document.getElementById("baseUrl").value.replace(/\/+$/, "");
+        return window.location.origin.replace(/\/+$/, "");
       }
+
       function getKey() {
-        return document.getElementById("apiKey").value;
+        return window.__TEST_API_KEY__ || "";
       }
 
       // Build transformation string from form inputs
@@ -331,6 +328,13 @@
         } else {
           document.getElementById("transformUrl").textContent = "—";
         }
+      }
+
+      function initConfigSummary() {
+        document.getElementById("baseUrl").textContent = getBase();
+        document.getElementById("apiKeyStatus").textContent = getKey()
+          ? "API key loaded from server env"
+          : "API key not set in server env";
       }
       document
         .querySelectorAll(
@@ -486,6 +490,7 @@
       }
 
       // Initial health check
+      initConfigSummary();
       checkHealth();
     </script>
   </body>
