@@ -104,10 +104,7 @@ function buildApp(opts = {}) {
     try {
       const html = await fs.readFile(TEST_PAGE_PATH, "utf8");
       const apiKeyLiteral = JSON.stringify(process.env.API_KEY || "");
-      const hydratedHtml = html.replace(
-        /"__TEST_API_KEY__"/g,
-        apiKeyLiteral,
-      );
+      const hydratedHtml = html.replace(/"__TEST_API_KEY__"/g, apiKeyLiteral);
       return reply.type("text/html; charset=utf-8").send(hydratedHtml);
     } catch {
       return reply.code(404).send({ error: "test.html not found" });
