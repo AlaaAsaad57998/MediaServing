@@ -200,6 +200,25 @@
         <div class="result" id="uploadResult"></div>
       </div>
 
+      <!-- Bulk upload -->
+      <div class="card">
+        <h2>Bulk upload images</h2>
+        <p class="config-note" style="margin-bottom: 0.8rem">
+          Uses <code style="color: #94a3b8">POST /upload/bulk</code>. Field name
+          <code style="color: #94a3b8">files</code> (multiple). Optional
+          <code style="color: #94a3b8">folder</code> is taken from the folder
+          field above (sent first so it applies to all files).
+        </p>
+        <div>
+          <label for="bulkFiles">Image files (multiple)</label>
+          <input type="file" id="bulkFiles" accept="image/*" multiple />
+        </div>
+        <button id="bulkUploadBtn" onclick="bulkUploadFiles()">
+          Upload all
+        </button>
+        <div class="result" id="bulkUploadResult"></div>
+      </div>
+
       <!-- Transform Section -->
       <div class="card">
         <h2>Transform & View Image</h2>
@@ -361,6 +380,60 @@
           el.innerHTML =
             '<span class="status red"></span> Cannot reach server: ' +
             e.message;
+        }
+      }
+
+      async function bulkUploadFiles() {
+        const fileInput = document.getElementById("bulkFiles");
+        const folder = document.getElementById("uploadFolder").value.trim();
+        const btn = document.getElementById("bulkUploadBtn");
+
+        if (!fileInput.files.length) {
+          showResult("bulkUploadResult", "Please select one or more files", true);
+          return;
+        }
+
+        const form = new FormData();
+        if (folder) {
+          form.append("folder", folder);
+        }
+        for (let i = 0; i < fileInput.files.length; i++) {
+          form.append("files", fileInput.files[i]);
+        }
+
+        btn.disabled = true;
+        btn.textContent = "Uploading...";
+        try {
+          const res = await fetch(getBase() + "/upload/bulk", {
+            method: "POST",
+            headers: { "X-API-Key": getKey() },
+            body: form,
+          });
+          const data = await res.json();
+          if (res.ok) {
+            showResult(
+              "bulkUploadResult",
+              "Status: " + res.status + "\n" + JSON.stringify(data, null, 2),
+              false,
+            );
+            if (data.items && data.items.length > 0) {
+              const last = data.items[data.items.length - 1];
+              const relativePath = last.key.replace(/^originals\//, "");
+              document.getElementById("filePath").value = relativePath;
+              updateUrlPreview();
+            }
+          } else {
+            showResult(
+              "bulkUploadResult",
+              "Status: " + res.status + "\n" + JSON.stringify(data, null, 2),
+              true,
+            );
+          }
+        } catch (e) {
+          showResult("bulkUploadResult", "Error: " + e.message, true);
+        } finally {
+          btn.disabled = false;
+          btn.textContent = "Upload all";
         }
       }
 

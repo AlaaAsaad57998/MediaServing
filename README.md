@@ -20,11 +20,11 @@ No third-party image services, no per-image fees, no data leaving your infrastru
 
 | Feature                   | Details                                                                      |
 | ------------------------- | ---------------------------------------------------------------------------- |
-| **Image upload**          | Upload JPEG, PNG, WebP, or AVIF images via a simple HTTP POST                |
+| **Image upload**          | Single or bulk upload (JPEG, PNG, WebP, AVIF) via HTTP POST                  |
 | **On-the-fly transforms** | Resize, crop, convert format, adjust quality — all via URL parameters        |
 | **Smart caching**         | Transformed results are stored and served without re-processing              |
 | **Distributed locking**   | Prevents duplicate work when multiple requests arrive simultaneously         |
-| **API key auth**          | Only `POST /upload` requires an `X-API-Key` header — image serving is public |
+| **API key auth**          | `POST /upload` and `POST /upload/bulk` require an `X-API-Key` — image serving is public |
 | **Rate limiting**         | Per-key and per-IP limits protect the service from abuse                     |
 | **CORS support**          | Configurable allowed origins for browser-based clients                       |
 | **Health check**          | `/health` endpoint — no auth required, useful for uptime monitoring          |
@@ -51,7 +51,7 @@ MediaServing/
 │   ├── index.js                  # Entry point — starts the server
 │   ├── app.js                    # App factory — plugins, routes, error handler
 │   ├── api/
-│   │   ├── upload.js             # POST /upload
+│   │   ├── upload.js             # POST /upload, POST /upload/bulk
 │   │   └── transform.js          # GET /media/upload/:transformations/*
 │   ├── config/
 │   │   └── env.js                # Environment variable loading
@@ -81,7 +81,7 @@ MediaServing/
 
 ### Authentication
 
-Only **`POST /upload`** requires authentication. Image serving and the health check are fully public.
+**`POST /upload`** and **`POST /upload/bulk`** require authentication. Image serving and the health check are fully public.
 
 Protected endpoints require an `X-API-Key` header:
 
@@ -100,6 +100,7 @@ Missing or incorrect key on a protected endpoint → `401 Unauthorized`.
 **Protected routes (API key required):**
 
 - `POST /upload`
+- `POST /upload/bulk`
 
 ---
 
@@ -150,6 +151,63 @@ curl -X POST http://localhost:3000/upload \
 - `400` — No file provided, or file is empty
 - `401` — Missing or invalid API key
 - `429` — Rate limit exceeded (default: 20 uploads/minute)
+
+---
+
+### `POST /upload/bulk`
+
+Upload multiple images in one request. Response order matches the order of file parts in the multipart body.
+
+**Request:** `multipart/form-data`
+
+| Field    | Type   | Required | Description                                                                 |
+| -------- | ------ | -------- | --------------------------------------------------------------------------- |
+| `files`  | file[] | Yes      | One or more image files (repeat the `files` field for each file)           |
+| `folder` | string | No       | Optional subfolder for **all** uploads in this request                      |
+
+Place the `folder` field **before** the file parts when possible so parsers see it first (same guidance as `@fastify/multipart`).
+
+**Example:**
+
+```bash
+curl -X POST http://localhost:3000/upload/bulk \
+  -H "X-API-Key: your-api-key" \
+  -F "folder=products" \
+  -F "files=@/path/to/one.jpg" \
+  -F "files=@/path/to/two.png"
+```
+
+**Success Response (201):**
+
+```json
+{
+  "urls": [
+    "/media/upload/f_webp/products/1712001234567.jpg",
+    "/media/upload/f_webp/products/1712001234890.png"
+  ],
+  "items": [
+    {
+      "key": "originals/products/1712001234567.jpg",
+      "size": 204800,
+      "url": "/media/upload/f_webp/products/1712001234567.jpg"
+    },
+    {
+      "key": "originals/products/1712001234890.png",
+      "size": 51200,
+      "url": "/media/upload/f_webp/products/1712001234890.png"
+    }
+  ]
+}
+```
+
+The `urls` array is in the same order as the uploaded `files` parts.
+
+**Error Responses:**
+
+- `400` — No files provided, or one or more files are empty
+- `401` — Missing or invalid API key
+- `413` — Too many files (default max: 50, override with `UPLOAD_BULK_MAX_FILES`) or file / body too large
+- `429` — Rate limit exceeded (same limits as `POST /upload`)
 
 ---
 
@@ -267,7 +325,7 @@ All configuration lives in `.env.development` (local) or `.env.production` (prod
 
 | Variable  | Description                                                                                            |
 | --------- | ------------------------------------------------------------------------------------------------------ |
-| `API_KEY` | Required. A strong secret string. Must be sent via the `X-API-Key` header when calling `POST /upload`. |
+| `API_KEY` | Required. A strong secret string. Send via the `X-API-Key` header for `POST /upload` and `POST /upload/bulk`. |
 
 ### Rate Limiting
 
@@ -275,7 +333,8 @@ All configuration lives in `.env.development` (local) or `.env.production` (prod
 | -------------------------- | ------- | ------------------------------------- |
 | `RATE_LIMIT_MAX`           | `120`   | Max requests per time window (global) |
 | `RATE_LIMIT_WINDOW_MS`     | `60000` | Time window in milliseconds (60s)     |
-| `UPLOAD_RATE_LIMIT_MAX`    | `20`    | Max upload requests per window        |
+| `UPLOAD_RATE_LIMIT_MAX`    | `20`    | Max upload requests per window (`/upload` and `/upload/bulk` each count as one request) |
+| `UPLOAD_BULK_MAX_FILES`    | `50`    | Max number of file parts per `/upload/bulk` request |
 | `TRANSFORM_RATE_LIMIT_MAX` | `120`   | Max transform requests per window     |
 
 ### Networking
