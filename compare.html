@@ -1,0 +1,1510 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MediaServing vs Cloudinary — Benchmark</title>
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family: system-ui, sans-serif;
+        background: #0f172a;
+        color: #e2e8f0;
+        padding: 2rem;
+        min-height: 100vh;
+      }
+
+      h1 {
+        font-size: 1.6rem;
+        color: #38bdf8;
+        margin-bottom: 0.3rem;
+      }
+      .subtitle {
+        font-size: 0.9rem;
+        color: #64748b;
+        margin-bottom: 2rem;
+      }
+
+      h2 {
+        font-size: 1rem;
+        color: #94a3b8;
+        border-bottom: 1px solid #1e293b;
+        padding-bottom: 0.5rem;
+        margin-bottom: 1.2rem;
+      }
+
+      .container {
+        max-width: 1100px;
+        margin: 0 auto;
+      }
+
+      .card {
+        background: #1e293b;
+        border-radius: 10px;
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+      }
+
+      label {
+        display: block;
+        font-size: 0.82rem;
+        color: #94a3b8;
+        margin-bottom: 0.3rem;
+      }
+
+      input,
+      select {
+        width: 100%;
+        padding: 0.45rem 0.6rem;
+        border: 1px solid #334155;
+        border-radius: 5px;
+        background: #0f172a;
+        color: #e2e8f0;
+        font-size: 0.88rem;
+        margin-bottom: 0.8rem;
+      }
+      input[type="file"] {
+        padding: 0.4rem;
+      }
+      input[type="checkbox"] {
+        width: auto;
+        margin: 0;
+      }
+
+      .row {
+        display: flex;
+        gap: 0.8rem;
+        flex-wrap: wrap;
+      }
+      .row > div {
+        flex: 1;
+        min-width: 110px;
+      }
+
+      /* ─── Buttons ─── */
+      button {
+        border: none;
+        padding: 0.55rem 1.4rem;
+        border-radius: 5px;
+        font-size: 0.88rem;
+        cursor: pointer;
+        font-weight: 600;
+        transition: opacity 0.15s;
+      }
+      button:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+      .btn-primary {
+        background: #2563eb;
+        color: #fff;
+      }
+      .btn-primary:not(:disabled):hover {
+        background: #1d4ed8;
+      }
+      .btn-cold {
+        background: #7c3aed;
+        color: #fff;
+      }
+      .btn-cold:not(:disabled):hover {
+        background: #6d28d9;
+      }
+      .btn-warm {
+        background: #0891b2;
+        color: #fff;
+      }
+      .btn-warm:not(:disabled):hover {
+        background: #0e7490;
+      }
+      .btn-run {
+        background: #059669;
+        color: #fff;
+      }
+      .btn-run:not(:disabled):hover {
+        background: #047857;
+      }
+
+      .btn-row {
+        display: flex;
+        gap: 0.6rem;
+        flex-wrap: wrap;
+        margin-top: 1rem;
+      }
+
+      /* ─── Columns ─── */
+      .cols {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+        margin-top: 1.2rem;
+      }
+      @media (max-width: 720px) {
+        .cols {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .col-our {
+        border: 1px solid #1d4ed8;
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      .col-cloud {
+        border: 1px solid #d97706;
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      .col-header {
+        padding: 0.6rem 1rem;
+        font-size: 0.88rem;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .col-our .col-header {
+        background: #1e3a8a;
+        color: #93c5fd;
+      }
+      .col-cloud .col-header {
+        background: #78350f;
+        color: #fcd34d;
+      }
+
+      .col-body {
+        padding: 1rem;
+      }
+
+      /* ─── Metric tiles ─── */
+      .metrics {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.6rem;
+        margin-bottom: 0.8rem;
+      }
+
+      .metric {
+        background: #0f172a;
+        border-radius: 6px;
+        padding: 0.5rem 0.8rem;
+        min-width: 120px;
+        flex: 1;
+      }
+      .metric-label {
+        font-size: 0.72rem;
+        color: #64748b;
+        margin-bottom: 0.15rem;
+      }
+      .metric-value {
+        font-size: 1.05rem;
+        font-weight: 700;
+        font-family: monospace;
+        color: #e2e8f0;
+      }
+      .metric-value.good {
+        color: #22c55e;
+      }
+      .metric-value.ok {
+        color: #f59e0b;
+      }
+      .metric-value.idle {
+        color: #475569;
+      }
+
+      /* ─── Preview ─── */
+      .preview-wrap {
+        text-align: center;
+        min-height: 80px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+      }
+      .preview-wrap img {
+        max-width: 100%;
+        max-height: 260px;
+        border-radius: 5px;
+        border: 1px solid #334155;
+        display: none;
+      }
+      .preview-wrap img.show {
+        display: block;
+      }
+      .preview-meta {
+        font-size: 0.76rem;
+        color: #64748b;
+        margin-top: 0.4rem;
+      }
+
+      /* ─── Status message ─── */
+      .status-msg {
+        font-size: 0.82rem;
+        margin-top: 0.5rem;
+        padding: 0.5rem 0.7rem;
+        border-radius: 5px;
+        display: none;
+        font-family: monospace;
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+      .status-msg.show {
+        display: block;
+      }
+      .status-msg.err {
+        background: #1c0b0b;
+        border-left: 3px solid #ef4444;
+        color: #fca5a5;
+      }
+      .status-msg.ok {
+        background: #021c0e;
+        border-left: 3px solid #22c55e;
+        color: #86efac;
+      }
+      .status-msg.info {
+        background: #0f1e30;
+        border-left: 3px solid #38bdf8;
+        color: #7dd3fc;
+      }
+
+      /* ─── Global log ─── */
+      #globalLog {
+        font-size: 0.8rem;
+        font-family: monospace;
+        background: #0f172a;
+        border: 1px solid #1e293b;
+        border-radius: 6px;
+        padding: 0.8rem;
+        max-height: 140px;
+        overflow-y: auto;
+        color: #94a3b8;
+        display: none;
+      }
+      #globalLog.show {
+        display: block;
+      }
+      #globalLog .log-line {
+        margin-bottom: 0.2rem;
+      }
+      #globalLog .log-line.err {
+        color: #f87171;
+      }
+      #globalLog .log-line.good {
+        color: #4ade80;
+      }
+
+      /* ─── Summary table ─── */
+      .summary-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.88rem;
+      }
+      .summary-table th,
+      .summary-table td {
+        padding: 0.6rem 0.8rem;
+        text-align: left;
+      }
+      .summary-table th {
+        color: #94a3b8;
+        border-bottom: 1px solid #334155;
+        font-weight: 600;
+      }
+      .summary-table td {
+        border-bottom: 1px solid #1e293b;
+      }
+      .summary-table .winner {
+        color: #22c55e;
+        font-weight: 700;
+      }
+      .summary-table .loser {
+        color: #f87171;
+      }
+      .summary-table .tie {
+        color: #f59e0b;
+      }
+      .summary-table .na {
+        color: #475569;
+        font-style: italic;
+      }
+
+      /* ─── Step badge ─── */
+      .step-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        background: #2563eb;
+        color: #fff;
+        font-size: 0.75rem;
+        font-weight: 700;
+        margin-right: 0.5rem;
+        flex-shrink: 0;
+      }
+      .card-title {
+        display: flex;
+        align-items: center;
+        margin-bottom: 1.2rem;
+      }
+      .card-title h2 {
+        border: none;
+        padding: 0;
+        margin: 0;
+        font-size: 1.05rem;
+        color: #e2e8f0;
+      }
+
+      .hint {
+        font-size: 0.8rem;
+        color: #475569;
+        margin-top: -0.4rem;
+        margin-bottom: 0.8rem;
+      }
+
+      /* ─── Config ─── */
+      .config-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0 1.2rem;
+      }
+      @media (max-width: 600px) {
+        .config-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .config-divider {
+        grid-column: 1 / -1;
+        height: 1px;
+        background: #1e293b;
+        margin: 0.4rem 0 0.8rem;
+      }
+      .config-section-label {
+        grid-column: 1 / -1;
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #475569;
+        margin-bottom: 0.4rem;
+      }
+
+      .badge-our {
+        background: #1d4ed8;
+        color: #bfdbfe;
+        padding: 0.15rem 0.5rem;
+        border-radius: 3px;
+        font-size: 0.75rem;
+      }
+      .badge-cloud {
+        background: #b45309;
+        color: #fef3c7;
+        padding: 0.15rem 0.5rem;
+        border-radius: 3px;
+        font-size: 0.75rem;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>MediaServing vs Cloudinary</h1>
+      <p class="subtitle">Upload &amp; transformation performance benchmark</p>
+
+      <!-- ── CONFIGURATION ── -->
+      <div class="card">
+        <h2>Configuration</h2>
+        <div class="config-grid">
+          <div class="config-section-label">Our App</div>
+          <div>
+            <label>Base URL</label>
+            <input type="text" id="cfgBase" readonly style="color: #38bdf8" />
+          </div>
+          <div
+            style="
+              display: flex;
+              flex-direction: column;
+              justify-content: flex-end;
+            "
+          >
+            <div
+              id="cfgApiKeyStatus"
+              style="font-size: 0.82rem; color: #64748b; padding: 0.45rem 0"
+            ></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── STEP 1 : UPLOAD ── -->
+      <div class="card">
+        <div class="card-title">
+          <span class="step-badge">1</span>
+          <h2>Upload Benchmark</h2>
+        </div>
+        <p class="hint">
+          Select an image. Both services will receive the same file
+          simultaneously.
+        </p>
+
+        <div>
+          <label for="uploadFile">Image file</label>
+          <input type="file" id="uploadFile" accept="image/*" />
+        </div>
+
+        <div class="btn-row">
+          <button id="btnUpload" class="btn-run" onclick="runUploadBenchmark()">
+            Run Upload Test
+          </button>
+        </div>
+
+        <div class="cols">
+          <!-- our app -->
+          <div class="col-our">
+            <div class="col-header">
+              <span class="badge-our">OUR APP</span> Upload result
+            </div>
+            <div class="col-body">
+              <div class="metrics">
+                <div class="metric">
+                  <div class="metric-label">Upload time</div>
+                  <div class="metric-value idle" id="ourUploadTime">—</div>
+                </div>
+                <div class="metric">
+                  <div class="metric-label">File size sent</div>
+                  <div class="metric-value idle" id="ourUploadSizeSent">—</div>
+                </div>
+                <div class="metric">
+                  <div class="metric-label">Stored size</div>
+                  <div class="metric-value idle" id="ourUploadSizeStored">
+                    —
+                  </div>
+                </div>
+              </div>
+              <div class="status-msg" id="ourUploadMsg"></div>
+            </div>
+          </div>
+          <!-- cloudinary -->
+          <div class="col-cloud">
+            <div class="col-header">
+              <span class="badge-cloud">CLOUDINARY</span> Upload result
+            </div>
+            <div class="col-body">
+              <div class="metrics">
+                <div class="metric">
+                  <div class="metric-label">Upload time</div>
+                  <div class="metric-value idle" id="cldUploadTime">—</div>
+                </div>
+                <div class="metric">
+                  <div class="metric-label">File size sent</div>
+                  <div class="metric-value idle" id="cldUploadSizeSent">—</div>
+                </div>
+                <div class="metric">
+                  <div class="metric-label">Stored size</div>
+                  <div class="metric-value idle" id="cldUploadSizeStored">
+                    —
+                  </div>
+                </div>
+              </div>
+              <div class="status-msg" id="cldUploadMsg"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── STEP 2 : TRANSFORMATION ── -->
+      <div class="card">
+        <div class="card-title">
+          <span class="step-badge">2</span>
+          <h2>Transformation Benchmark</h2>
+        </div>
+        <p class="hint">
+          Configure transformation params and click the test buttons. Requires
+          Step 1 to be completed first (or you can type a path/public-id
+          manually below).
+        </p>
+
+        <!-- manual overrides -->
+        <div class="row" style="margin-bottom: 0.6rem">
+          <div>
+            <label>Our App — file path (auto-filled after upload)</label>
+            <input
+              type="text"
+              id="ourFilePath"
+              placeholder="e.g. avatars/photo.jpg"
+            />
+          </div>
+          <div>
+            <label>Cloudinary — public_id (auto-filled after upload)</label>
+            <input
+              type="text"
+              id="cldPublicId"
+              placeholder="e.g. sample_image"
+            />
+          </div>
+        </div>
+
+        <!-- transform params -->
+        <div class="row">
+          <div>
+            <label for="tW">Width (w)</label>
+            <input
+              type="number"
+              id="tW"
+              placeholder="e.g. 400"
+              min="1"
+              max="10000"
+            />
+          </div>
+          <div>
+            <label for="tH">Height (h)</label>
+            <input
+              type="number"
+              id="tH"
+              placeholder="e.g. 400"
+              min="1"
+              max="10000"
+            />
+          </div>
+          <div>
+            <label for="tQ">Quality (q)</label>
+            <input type="number" id="tQ" placeholder="80" min="1" max="100" />
+          </div>
+          <div>
+            <label for="tF">Format (f)</label>
+            <select id="tF">
+              <option value="">— original —</option>
+              <option value="webp" selected>webp</option>
+              <option value="jpeg">jpeg</option>
+              <option value="png">png</option>
+              <option value="avif">avif</option>
+            </select>
+          </div>
+          <div>
+            <label for="tC">Fit / Crop (c)</label>
+            <select id="tC">
+              <option value="">— default —</option>
+              <option value="cover">cover</option>
+              <option value="contain">contain</option>
+              <option value="fill">fill</option>
+              <option value="inside">inside</option>
+              <option value="outside">outside</option>
+            </select>
+          </div>
+        </div>
+        <div style="margin: 0.3rem 0 0.8rem">
+          <label style="display: inline-flex; align-items: center; gap: 0.4rem">
+            <input type="checkbox" id="tLossy" /> fl_lossy
+          </label>
+        </div>
+
+        <div style="font-size: 0.8rem; color: #475569; margin-bottom: 1rem">
+          Our App URL: <span id="ourTransformUrl" style="color: #38bdf8">—</span
+          ><br />
+          Cloudinary URL:
+          <span id="cldTransformUrl" style="color: #fcd34d">—</span>
+        </div>
+
+        <div class="btn-row">
+          <button
+            id="btnCold"
+            class="btn-cold"
+            onclick="runTransformBenchmark('cold')"
+          >
+            🧊 Test First Fetch (Cold)
+          </button>
+          <button
+            id="btnWarm"
+            class="btn-warm"
+            onclick="runTransformBenchmark('warm')"
+          >
+            ♻️ Test Cached Fetch (Warm)
+          </button>
+        </div>
+
+        <!-- cold row -->
+        <div id="coldSection" style="display: none">
+          <h2 style="margin-top: 1.2rem; font-size: 0.9rem; color: #7c3aed">
+            🧊 First Fetch Results
+          </h2>
+          <div class="cols">
+            <div class="col-our">
+              <div class="col-header">
+                <span class="badge-our">OUR APP</span> Cold
+              </div>
+              <div class="col-body">
+                <div class="metrics">
+                  <div class="metric">
+                    <div class="metric-label">Response time</div>
+                    <div class="metric-value idle" id="ourColdTime">—</div>
+                  </div>
+                  <div class="metric">
+                    <div class="metric-label">Image size</div>
+                    <div class="metric-value idle" id="ourColdSize">—</div>
+                  </div>
+                  <div class="metric">
+                    <div class="metric-label">Cache status</div>
+                    <div class="metric-value idle" id="ourColdCache">—</div>
+                  </div>
+                </div>
+                <div class="preview-wrap">
+                  <img id="ourColdImg" alt="Our App transform" />
+                  <div class="preview-meta" id="ourColdMeta"></div>
+                </div>
+                <div class="status-msg" id="ourColdMsg"></div>
+              </div>
+            </div>
+            <div class="col-cloud">
+              <div class="col-header">
+                <span class="badge-cloud">CLOUDINARY</span> Cold
+              </div>
+              <div class="col-body">
+                <div class="metrics">
+                  <div class="metric">
+                    <div class="metric-label">Response time</div>
+                    <div class="metric-value idle" id="cldColdTime">—</div>
+                  </div>
+                  <div class="metric">
+                    <div class="metric-label">Image size</div>
+                    <div class="metric-value idle" id="cldColdSize">—</div>
+                  </div>
+                  <div class="metric">
+                    <div class="metric-label">Cache status</div>
+                    <div class="metric-value idle" id="cldColdCache">—</div>
+                  </div>
+                </div>
+                <div class="preview-wrap">
+                  <img id="cldColdImg" alt="Cloudinary transform" />
+                  <div class="preview-meta" id="cldColdMeta"></div>
+                </div>
+                <div class="status-msg" id="cldColdMsg"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- warm row -->
+        <div id="warmSection" style="display: none">
+          <h2 style="margin-top: 1.2rem; font-size: 0.9rem; color: #0891b2">
+            ♻️ Cached Fetch Results
+          </h2>
+          <div class="cols">
+            <div class="col-our">
+              <div class="col-header">
+                <span class="badge-our">OUR APP</span> Cached
+              </div>
+              <div class="col-body">
+                <div class="metrics">
+                  <div class="metric">
+                    <div class="metric-label">Response time</div>
+                    <div class="metric-value idle" id="ourWarmTime">—</div>
+                  </div>
+                  <div class="metric">
+                    <div class="metric-label">Image size</div>
+                    <div class="metric-value idle" id="ourWarmSize">—</div>
+                  </div>
+                  <div class="metric">
+                    <div class="metric-label">Cache status</div>
+                    <div class="metric-value idle" id="ourWarmCache">—</div>
+                  </div>
+                </div>
+                <div class="preview-wrap">
+                  <img id="ourWarmImg" alt="Our App cached" />
+                  <div class="preview-meta" id="ourWarmMeta"></div>
+                </div>
+                <div class="status-msg" id="ourWarmMsg"></div>
+              </div>
+            </div>
+            <div class="col-cloud">
+              <div class="col-header">
+                <span class="badge-cloud">CLOUDINARY</span> Cached
+              </div>
+              <div class="col-body">
+                <div class="metrics">
+                  <div class="metric">
+                    <div class="metric-label">Response time</div>
+                    <div class="metric-value idle" id="cldWarmTime">—</div>
+                  </div>
+                  <div class="metric">
+                    <div class="metric-label">Image size</div>
+                    <div class="metric-value idle" id="cldWarmSize">—</div>
+                  </div>
+                  <div class="metric">
+                    <div class="metric-label">Cache status</div>
+                    <div class="metric-value idle" id="cldWarmCache">—</div>
+                  </div>
+                </div>
+                <div class="preview-wrap">
+                  <img id="cldWarmImg" alt="Cloudinary cached" />
+                  <div class="preview-meta" id="cldWarmMeta"></div>
+                </div>
+                <div class="status-msg" id="cldWarmMsg"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── STEP 3 : SUMMARY ── -->
+      <div class="card" id="summaryCard" style="display: none">
+        <div class="card-title">
+          <span class="step-badge">3</span>
+          <h2>Summary</h2>
+        </div>
+        <table class="summary-table">
+          <thead>
+            <tr>
+              <th>Metric</th>
+              <th>Our App</th>
+              <th>Cloudinary</th>
+              <th>Faster / Smaller</th>
+            </tr>
+          </thead>
+          <tbody id="summaryBody"></tbody>
+        </table>
+      </div>
+
+      <!-- log -->
+      <div style="margin-top: 0.5rem; margin-bottom: 1rem">
+        <div
+          style="
+            font-size: 0.78rem;
+            color: #475569;
+            margin-bottom: 0.3rem;
+            cursor: pointer;
+          "
+          onclick="toggleLog()"
+        >
+          ▸ Activity log
+        </div>
+        <div id="globalLog"></div>
+      </div>
+    </div>
+
+    <script>
+      // ─── Injected by server ────────────────────────────────────────────────
+      window.__TEST_API_KEY__ = "__TEST_API_KEY__";
+      window.__CLOUDINARY_CLOUD__ = "__CLOUDINARY_CLOUD_NAME__";
+      window.__CLOUDINARY_PRESET__ = "__CLOUDINARY_PRESET__";
+
+      // ─── State ────────────────────────────────────────────────────────────
+      const results = {
+        upload: { our: null, cld: null },
+        coldXform: { our: null, cld: null },
+        warmXform: { our: null, cld: null },
+      };
+
+      // ─── Init ─────────────────────────────────────────────────────────────
+      (function init() {
+        const base = window.location.origin.replace(/\/+$/, "");
+        document.getElementById("cfgBase").value = base;
+
+        const key = window.__TEST_API_KEY__ || "";
+        document.getElementById("cfgApiKeyStatus").textContent = key
+          ? "API key loaded from server env"
+          : "API key not set (unauthenticated)";
+
+        const paramIds = [
+          "tW",
+          "tH",
+          "tQ",
+          "tF",
+          "tC",
+          "tLossy",
+          "ourFilePath",
+          "cldPublicId",
+        ];
+        paramIds.forEach((id) => {
+          const el = document.getElementById(id);
+          if (el) {
+            el.addEventListener("input", updateUrlPreviews);
+            el.addEventListener("change", updateUrlPreviews);
+          }
+        });
+        updateUrlPreviews();
+      })();
+
+      // ─── Helpers ──────────────────────────────────────────────────────────
+      function getBase() {
+        return document.getElementById("cfgBase").value.replace(/\/+$/, "");
+      }
+      function getApiKey() {
+        return window.__TEST_API_KEY__ || "";
+      }
+      function getCloudName() {
+        return window.__CLOUDINARY_CLOUD__ || "";
+      }
+      function getPreset() {
+        return window.__CLOUDINARY_PRESET__ || "";
+      }
+
+      function fmtMs(ms) {
+        return ms == null ? "—" : ms + " ms";
+      }
+      function fmtKB(bytes) {
+        if (bytes == null) return "—";
+        return bytes < 1024 ? bytes + " B" : (bytes / 1024).toFixed(1) + " KB";
+      }
+
+      function log(msg, type = "") {
+        const el = document.getElementById("globalLog");
+        el.classList.add("show");
+        const line = document.createElement("div");
+        line.className = "log-line " + type;
+        line.textContent = new Date().toLocaleTimeString() + " — " + msg;
+        el.appendChild(line);
+        el.scrollTop = el.scrollHeight;
+      }
+
+      function toggleLog() {
+        document.getElementById("globalLog").classList.toggle("show");
+      }
+
+      function setMetric(id, value, colorClass = "") {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = value;
+        el.className = "metric-value " + (colorClass || "");
+      }
+
+      function showMsg(id, text, type) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = text;
+        el.className = "status-msg show " + type;
+      }
+
+      function clearMsg(id) {
+        const el = document.getElementById(id);
+        if (el) el.className = "status-msg";
+      }
+
+      // Build our-app transformation segment from form values
+      function buildOurTransform() {
+        const parts = [];
+        const w = document.getElementById("tW").value;
+        const h = document.getElementById("tH").value;
+        const q = document.getElementById("tQ").value;
+        const f = document.getElementById("tF").value;
+        const c = document.getElementById("tC").value;
+        const lossy = document.getElementById("tLossy").checked;
+        if (w) parts.push("w_" + w);
+        if (h) parts.push("h_" + h);
+        if (q) parts.push("q_" + q);
+        if (f) parts.push("f_" + f);
+        if (c) parts.push("c_" + c);
+        if (lossy) parts.push("fl_lossy");
+        return parts.join(",");
+      }
+
+      // Map our params → Cloudinary transformation segment
+      // Mapping our Sharp fit values → Cloudinary crop modes (closest equivalents).
+      // cover  = crop to exact w×h            → c_fill  (same)
+      // contain = fit within, no crop/pad     → c_fit   (same)
+      // fill   = stretch to exact w×h         → c_scale (same)
+      // inside = fit within, no pad (≤ w,h)   → c_fit   (same)
+      // outside = ensure both dims ≥ w,h, no crop → c_fill is the closest:
+      //           both result in the image covering the target area.
+      //           (c_limit would be wrong — it only shrinks, never enlarges)
+      const FIT_MAP = {
+        cover: "c_fill",
+        contain: "c_fit",
+        fill: "c_scale",
+        inside: "c_fit",
+        outside: "c_fill",
+      };
+      const FMT_MAP = { jpeg: "jpg" };
+
+      function buildCldTransform() {
+        const parts = [];
+        const w = document.getElementById("tW").value;
+        const h = document.getElementById("tH").value;
+        const q = document.getElementById("tQ").value;
+        const f = document.getElementById("tF").value;
+        const c = document.getElementById("tC").value;
+        const lossy = document.getElementById("tLossy").checked;
+        if (w) parts.push("w_" + w);
+        if (h) parts.push("h_" + h);
+        if (q) parts.push("q_" + q);
+        if (f) {
+          const mapped = FMT_MAP[f] || f;
+          parts.push("f_" + mapped);
+        }
+        if (c) parts.push(FIT_MAP[c] || "c_" + c);
+        if (lossy) parts.push("fl_lossy");
+        return parts.join(",");
+      }
+
+      function buildOurUrl() {
+        const fp = document.getElementById("ourFilePath").value.trim();
+        if (!fp) return null;
+        const t = buildOurTransform();
+        return t
+          ? getBase() + "/media/upload/" + t + "/" + fp
+          : getBase() + "/media/upload/" + fp;
+      }
+
+      function buildCldUrl() {
+        const pid = document.getElementById("cldPublicId").value.trim();
+        if (!pid) return null;
+        const cloud = getCloudName();
+        if (!cloud) return null;
+        const t = buildCldTransform();
+        return t
+          ? "https://res.cloudinary.com/" +
+              cloud +
+              "/image/upload/" +
+              t +
+              "/" +
+              pid
+          : "https://res.cloudinary.com/" + cloud + "/image/upload/" + pid;
+      }
+
+      function updateUrlPreviews() {
+        const ourUrl = buildOurUrl();
+        const cldUrl = buildCldUrl();
+        document.getElementById("ourTransformUrl").textContent = ourUrl || "—";
+        document.getElementById("cldTransformUrl").textContent = cldUrl || "—";
+      }
+
+      // Fetch with timing; returns { timeMs, blob, status, headers, error }
+      async function timedFetch(url, options = {}) {
+        const t0 = performance.now();
+        try {
+          const res = await fetch(url, options);
+          const blob = await res.blob();
+          const timeMs = Math.round(performance.now() - t0);
+          const headers = {};
+          res.headers.forEach((v, k) => {
+            headers[k] = v;
+          });
+          return { timeMs, blob, status: res.status, headers, ok: res.ok };
+        } catch (err) {
+          const timeMs = Math.round(performance.now() - t0);
+          return { timeMs, error: err.message, ok: false };
+        }
+      }
+
+      // ─── UPLOAD BENCHMARK ────────────────────────────────────────────────
+      async function runUploadBenchmark() {
+        const fileInput = document.getElementById("uploadFile");
+        if (!fileInput.files.length) {
+          log("Please select a file first", "err");
+          return;
+        }
+        const file = fileInput.files[0];
+        const btn = document.getElementById("btnUpload");
+        btn.disabled = true;
+        btn.textContent = "Uploading…";
+
+        // Reset previous results
+        ["ourUploadTime", "ourUploadSizeSent", "ourUploadSizeStored"].forEach(
+          (id) => setMetric(id, "—", "idle"),
+        );
+        ["cldUploadTime", "cldUploadSizeSent", "cldUploadSizeStored"].forEach(
+          (id) => setMetric(id, "—", "idle"),
+        );
+        clearMsg("ourUploadMsg");
+        clearMsg("cldUploadMsg");
+
+        log(
+          "Starting upload benchmark for " +
+            file.name +
+            " (" +
+            fmtKB(file.size) +
+            ")",
+        );
+
+        // Run both uploads in parallel
+        const [ourRes, cldRes] = await Promise.all([
+          uploadToOurApp(file),
+          uploadToCloudinary(file),
+        ]);
+
+        // Our App result
+        if (ourRes.ok) {
+          setMetric("ourUploadTime", fmtMs(ourRes.timeMs), "good");
+          setMetric("ourUploadSizeSent", fmtKB(file.size));
+          setMetric("ourUploadSizeStored", fmtKB(ourRes.data?.size));
+          showMsg("ourUploadMsg", JSON.stringify(ourRes.data, null, 2), "ok");
+          results.upload.our = ourRes;
+          document.getElementById("ourFilePath").value = (
+            ourRes.data?.key || ""
+          ).replace(/^originals\//, "");
+          log("Our App upload done in " + ourRes.timeMs + " ms", "good");
+        } else {
+          setMetric("ourUploadTime", fmtMs(ourRes.timeMs), "");
+          showMsg(
+            "ourUploadMsg",
+            "Error: " + (ourRes.error || "HTTP " + ourRes.status),
+            "err",
+          );
+          log(
+            "Our App upload failed: " + (ourRes.error || ourRes.status),
+            "err",
+          );
+        }
+
+        // Cloudinary result
+        if (cldRes.ok) {
+          setMetric("cldUploadTime", fmtMs(cldRes.timeMs), "good");
+          setMetric("cldUploadSizeSent", fmtKB(file.size));
+          setMetric("cldUploadSizeStored", fmtKB(cldRes.data?.bytes));
+          showMsg(
+            "cldUploadMsg",
+            JSON.stringify(
+              {
+                public_id: cldRes.data?.public_id,
+                format: cldRes.data?.format,
+                bytes: cldRes.data?.bytes,
+                url: cldRes.data?.secure_url,
+              },
+              null,
+              2,
+            ),
+            "ok",
+          );
+          results.upload.cld = cldRes;
+          document.getElementById("cldPublicId").value =
+            cldRes.data?.public_id || "";
+          log("Cloudinary upload done in " + cldRes.timeMs + " ms", "good");
+        } else {
+          setMetric("cldUploadTime", fmtMs(cldRes.timeMs), "");
+          showMsg(
+            "cldUploadMsg",
+            "Error: " + (cldRes.error || "HTTP " + cldRes.status),
+            "err",
+          );
+          log(
+            "Cloudinary upload failed: " + (cldRes.error || cldRes.status),
+            "err",
+          );
+        }
+
+        updateUrlPreviews();
+        updateSummary();
+        btn.disabled = false;
+        btn.textContent = "Run Upload Test";
+      }
+
+      async function uploadToOurApp(file) {
+        const form = new FormData();
+        form.append("file", file);
+        const headers = {};
+        const key = getApiKey();
+        if (key) headers["X-API-Key"] = key;
+        const t0 = performance.now();
+        try {
+          const res = await fetch(getBase() + "/upload", {
+            method: "POST",
+            headers,
+            body: form,
+          });
+          const timeMs = Math.round(performance.now() - t0);
+          const data = await res.json();
+          return { ok: res.ok, timeMs, status: res.status, data };
+        } catch (err) {
+          return {
+            ok: false,
+            timeMs: Math.round(performance.now() - t0),
+            error: err.message,
+          };
+        }
+      }
+
+      async function uploadToCloudinary(file) {
+        const cloud = getCloudName();
+        const preset = getPreset();
+        if (!cloud || !preset) {
+          return {
+            ok: false,
+            error: "Cloud name / upload preset not configured",
+            timeMs: 0,
+          };
+        }
+        const form = new FormData();
+        form.append("file", file);
+        form.append("upload_preset", preset);
+        const url =
+          "https://api.cloudinary.com/v1_1/" + cloud + "/image/upload";
+        const t0 = performance.now();
+        try {
+          const res = await fetch(url, { method: "POST", body: form });
+          const timeMs = Math.round(performance.now() - t0);
+          const data = await res.json();
+          if (!res.ok)
+            return {
+              ok: false,
+              timeMs,
+              status: res.status,
+              error: data.error?.message || "Upload failed",
+            };
+          return { ok: true, timeMs, data };
+        } catch (err) {
+          return {
+            ok: false,
+            timeMs: Math.round(performance.now() - t0),
+            error: err.message,
+          };
+        }
+      }
+
+      // ─── TRANSFORM BENCHMARK ─────────────────────────────────────────────
+      async function runTransformBenchmark(mode) {
+        const ourUrl = buildOurUrl();
+        const cldUrl = buildCldUrl();
+
+        if (!ourUrl && !cldUrl) {
+          log(
+            "No file path / public_id set — run Upload Test first or fill in manually",
+            "err",
+          );
+          return;
+        }
+
+        const prefix = mode === "cold" ? "Cold" : "Warm";
+        const btnId = mode === "cold" ? "btnCold" : "btnWarm";
+        const btn = document.getElementById(btnId);
+        btn.disabled = true;
+        btn.textContent = "Fetching…";
+
+        const sec = mode === "cold" ? "coldSection" : "warmSection";
+        document.getElementById(sec).style.display = "block";
+
+        const pOur = mode + "Time"; // ourColdTime / ourWarmTime
+        const pOurSize = mode === "cold" ? "ourColdSize" : "ourWarmSize";
+        const pOurCache = mode === "cold" ? "ourColdCache" : "ourWarmCache";
+        const pOurImg = mode === "cold" ? "ourColdImg" : "ourWarmImg";
+        const pOurMeta = mode === "cold" ? "ourColdMeta" : "ourWarmMeta";
+        const pOurMsg = mode === "cold" ? "ourColdMsg" : "ourWarmMsg";
+        const pCldTime = mode === "cold" ? "cldColdTime" : "cldWarmTime";
+        const pCldSize = mode === "cold" ? "cldColdSize" : "cldWarmSize";
+        const pCldCache = mode === "cold" ? "cldColdCache" : "cldWarmCache";
+        const pCldImg = mode === "cold" ? "cldColdImg" : "cldWarmImg";
+        const pCldMeta = mode === "cold" ? "cldColdMeta" : "cldWarmMeta";
+        const pCldMsg = mode === "cold" ? "cldColdMsg" : "cldWarmMsg";
+
+        [
+          pOur + "Time" /* note: pOur is mode+Time but we need IDs */,
+          "our" + cap(mode) + "Time",
+          "our" + cap(mode) + "Size",
+          "our" + cap(mode) + "Cache",
+          "cld" + cap(mode) + "Time",
+          "cld" + cap(mode) + "Size",
+          "cld" + cap(mode) + "Cache",
+        ].forEach((id) => setMetric(id, "—", "idle"));
+
+        clearMsg("our" + cap(mode) + "Msg");
+        clearMsg("cld" + cap(mode) + "Msg");
+
+        log(
+          prefix +
+            " transform test — Our: " +
+            (ourUrl || "skip") +
+            " | Cld: " +
+            (cldUrl || "skip"),
+        );
+
+        const headers = {};
+        const key = getApiKey();
+        if (key) headers["X-API-Key"] = key;
+
+        const [ourFetch, cldFetch] = await Promise.all([
+          ourUrl
+            ? timedFetch(ourUrl, { headers, cache: "no-store" })
+            : Promise.resolve(null),
+          cldUrl
+            ? timedFetch(cldUrl, { cache: "no-store" })
+            : Promise.resolve(null),
+        ]);
+
+        // Our App
+        if (ourFetch) {
+          if (ourFetch.ok) {
+            const cacheHdr = ourFetch.headers["x-cache"] || "—";
+            const ct = ourFetch.headers["content-type"] || "";
+            setMetric(
+              "our" + cap(mode) + "Time",
+              fmtMs(ourFetch.timeMs),
+              "good",
+            );
+            setMetric("our" + cap(mode) + "Size", fmtKB(ourFetch.blob.size));
+            setMetric(
+              "our" + cap(mode) + "Cache",
+              cacheHdr,
+              cacheHdr === "HIT" ? "good" : "ok",
+            );
+            renderPreview(
+              pOurImg,
+              pOurMeta,
+              ourFetch.blob,
+              ct,
+              ourFetch.timeMs,
+              cacheHdr,
+            );
+            results[mode + "Xform"].our = ourFetch;
+            log(
+              "Our App " +
+                mode +
+                " done in " +
+                ourFetch.timeMs +
+                " ms (cache:" +
+                cacheHdr +
+                ")",
+              "good",
+            );
+          } else {
+            setMetric("our" + cap(mode) + "Time", fmtMs(ourFetch.timeMs));
+            showMsg(
+              pOurMsg,
+              "Error: " + (ourFetch.error || "HTTP " + ourFetch.status),
+              "err",
+            );
+            log(
+              "Our App " +
+                mode +
+                " fetch failed: " +
+                (ourFetch.error || ourFetch.status),
+              "err",
+            );
+          }
+        } else {
+          showMsg(pOurMsg, "Skipped — no file path configured", "info");
+        }
+
+        // Cloudinary
+        if (cldFetch) {
+          if (cldFetch.ok) {
+            const cacheHdr =
+              cldFetch.headers["x-cache"] ||
+              cldFetch.headers["cf-cache-status"] ||
+              "—";
+            const ct = cldFetch.headers["content-type"] || "";
+            setMetric(
+              "cld" + cap(mode) + "Time",
+              fmtMs(cldFetch.timeMs),
+              "good",
+            );
+            setMetric("cld" + cap(mode) + "Size", fmtKB(cldFetch.blob.size));
+            setMetric(
+              "cld" + cap(mode) + "Cache",
+              cacheHdr,
+              cacheHdr === "HIT" ? "good" : "ok",
+            );
+            renderPreview(
+              pCldImg,
+              pCldMeta,
+              cldFetch.blob,
+              ct,
+              cldFetch.timeMs,
+              cacheHdr,
+            );
+            results[mode + "Xform"].cld = cldFetch;
+            log(
+              "Cloudinary " +
+                mode +
+                " done in " +
+                cldFetch.timeMs +
+                " ms (cache:" +
+                cacheHdr +
+                ")",
+              "good",
+            );
+          } else {
+            setMetric("cld" + cap(mode) + "Time", fmtMs(cldFetch.timeMs));
+            showMsg(
+              pCldMsg,
+              "Error: " + (cldFetch.error || "HTTP " + cldFetch.status),
+              "err",
+            );
+            log(
+              "Cloudinary " +
+                mode +
+                " fetch failed: " +
+                (cldFetch.error || cldFetch.status),
+              "err",
+            );
+          }
+        } else {
+          showMsg(
+            pCldMsg,
+            "Skipped — no Cloudinary public_id configured",
+            "info",
+          );
+        }
+
+        updateSummary();
+        btn.disabled = false;
+        btn.textContent =
+          mode === "cold"
+            ? "🧊 Test First Fetch (Cold)"
+            : "♻️ Test Cached Fetch (Warm)";
+      }
+
+      function cap(s) {
+        return s.charAt(0).toUpperCase() + s.slice(1);
+      }
+
+      function renderPreview(imgId, metaId, blob, ct, timeMs, cacheHdr) {
+        const imgEl = document.getElementById(imgId);
+        const metaEl = document.getElementById(metaId);
+        if (!imgEl) return;
+        const url = URL.createObjectURL(blob);
+        imgEl.onload = function () {
+          const dim = this.naturalWidth + "×" + this.naturalHeight;
+          metaEl.textContent =
+            dim +
+            " · " +
+            fmtKB(blob.size) +
+            " · " +
+            ct.split(";")[0] +
+            " · " +
+            timeMs +
+            " ms · cache: " +
+            cacheHdr;
+        };
+        imgEl.src = url;
+        imgEl.classList.add("show");
+      }
+
+      // ─── SUMMARY ─────────────────────────────────────────────────────────
+      function updateSummary() {
+        const rows = [];
+
+        // Upload
+        const uOur = results.upload.our;
+        const uCld = results.upload.cld;
+        if (uOur || uCld) {
+          rows.push(
+            buildRow(
+              "Upload time",
+              uOur?.ok ? uOur.timeMs : null,
+              uCld?.ok ? uCld.timeMs : null,
+              "ms",
+              true,
+            ),
+          );
+          rows.push(
+            buildRow(
+              "Stored size",
+              uOur?.ok ? uOur.data?.size : null,
+              uCld?.ok ? uCld.data?.bytes : null,
+              "bytes",
+              true,
+            ),
+          );
+        }
+
+        // Cold transform
+        const cOur = results.coldXform.our;
+        const cCld = results.coldXform.cld;
+        if (cOur || cCld) {
+          rows.push(
+            buildRow(
+              "Cold response time",
+              cOur?.ok ? cOur.timeMs : null,
+              cCld?.ok ? cCld.timeMs : null,
+              "ms",
+              true,
+            ),
+          );
+          rows.push(
+            buildRow(
+              "Cold image size",
+              cOur?.ok ? cOur.blob?.size : null,
+              cCld?.ok ? cCld.blob?.size : null,
+              "bytes",
+              true,
+            ),
+          );
+        }
+
+        // Warm transform
+        const wOur = results.warmXform.our;
+        const wCld = results.warmXform.cld;
+        if (wOur || wCld) {
+          rows.push(
+            buildRow(
+              "Cached response time",
+              wOur?.ok ? wOur.timeMs : null,
+              wCld?.ok ? wCld.timeMs : null,
+              "ms",
+              true,
+            ),
+          );
+          rows.push(
+            buildRow(
+              "Cached image size",
+              wOur?.ok ? wOur.blob?.size : null,
+              wCld?.ok ? wCld.blob?.size : null,
+              "bytes",
+              true,
+            ),
+          );
+        }
+
+        if (!rows.length) return;
+
+        const card = document.getElementById("summaryCard");
+        card.style.display = "block";
+        document.getElementById("summaryBody").innerHTML = rows.join("");
+      }
+
+      function buildRow(label, ourVal, cldVal, unit, lowerIsBetter) {
+        const fmtVal = (v) =>
+          v == null
+            ? '<span class="na">—</span>'
+            : unit === "bytes"
+              ? fmtKB(v)
+              : v + " " + unit;
+
+        let ourCls = "",
+          cldCls = "",
+          winner = "";
+        if (ourVal != null && cldVal != null) {
+          if (ourVal === cldVal) {
+            ourCls = cldCls = "tie";
+            winner = "Tie";
+          } else {
+            const ourWins = lowerIsBetter ? ourVal < cldVal : ourVal > cldVal;
+            ourCls = ourWins ? "winner" : "loser";
+            cldCls = ourWins ? "loser" : "winner";
+            winner =
+              '<span class="' +
+              (ourWins ? "winner" : "loser") +
+              '">' +
+              (ourWins ? "Our App ▲" : "Cloudinary ▲") +
+              "</span>";
+          }
+        } else if (ourVal != null) {
+          winner = '<span class="na">only our app measured</span>';
+        } else if (cldVal != null) {
+          winner = '<span class="na">only Cloudinary measured</span>';
+        }
+
+        return (
+          "<tr>" +
+          "<td>" +
+          label +
+          "</td>" +
+          '<td class="' +
+          ourCls +
+          '">' +
+          fmtVal(ourVal) +
+          "</td>" +
+          '<td class="' +
+          cldCls +
+          '">' +
+          fmtVal(cldVal) +
+          "</td>" +
+          "<td>" +
+          winner +
+          "</td>" +
+          "</tr>"
+        );
+      }
+    </script>
+  </body>
+</html>

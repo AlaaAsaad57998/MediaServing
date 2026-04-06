@@ -11,6 +11,7 @@ const { createRedisClient, initRedis } = require("./services/lockService");
 const { ValidationError } = require("./utils/paramParser");
 
 const TEST_PAGE_PATH = path.resolve(__dirname, "..", "test.html");
+const COMPARE_PAGE_PATH = path.resolve(__dirname, "..", "compare.html");
 
 function toInt(value, fallback) {
   const parsed = Number.parseInt(value, 10);
@@ -111,6 +112,27 @@ function buildApp(opts = {}) {
     }
   }
 
+  async function serveComparePage(reply) {
+    try {
+      let html = await fs.readFile(COMPARE_PAGE_PATH, "utf8");
+      html = html.replace(
+        /"__TEST_API_KEY__"/g,
+        JSON.stringify(process.env.API_KEY || ""),
+      );
+      html = html.replace(
+        /"__CLOUDINARY_CLOUD_NAME__"/g,
+        JSON.stringify(process.env.CLOUDINARY_CLOUD_NAME || ""),
+      );
+      html = html.replace(
+        /"__CLOUDINARY_PRESET__"/g,
+        JSON.stringify(process.env.CLOUDINARY_UPLOAD_PRESET || ""),
+      );
+      return reply.type("text/html; charset=utf-8").send(html);
+    } catch {
+      return reply.code(404).send({ error: "compare.html not found" });
+    }
+  }
+
   // Public test panel route for deployment checks.
   app.get("/test", { config: { rateLimit: false } }, async (_, reply) =>
     serveTestPage(reply),
@@ -118,6 +140,15 @@ function buildApp(opts = {}) {
 
   app.get("/test.html", { config: { rateLimit: false } }, async (_, reply) =>
     serveTestPage(reply),
+  );
+
+  // Benchmark comparison page.
+  app.get("/compare", { config: { rateLimit: false } }, async (_, reply) =>
+    serveComparePage(reply),
+  );
+
+  app.get("/compare.html", { config: { rateLimit: false } }, async (_, reply) =>
+    serveComparePage(reply),
   );
 
   // Routes
