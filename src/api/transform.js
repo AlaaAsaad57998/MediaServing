@@ -1,4 +1,8 @@
-const { parseParams, ValidationError } = require("../utils/paramParser");
+const {
+  parseParams,
+  resolveQAuto,
+  ValidationError,
+} = require("../utils/paramParser");
 const { generateDerivedKey } = require("../utils/hashGenerator");
 const { getObjectBuffer } = require("../storage/s3Client");
 const {
@@ -99,6 +103,30 @@ async function transformRoutes(fastify) {
         }
         throw err;
       }
+
+      // --- Resolve auto values BEFORE cache-key generation ---
+      // f_auto: pick the best format the browser actually supports.
+      // Priority: avif > webp > original (avif encodes slower; WebP is a
+      // safe default for most traffic).
+      if (params.f === "auto") {
+        const accept = request.headers["accept"] || "";
+        if (accept.includes("image/avif")) {
+          params.f = "avif";
+        } else if (accept.includes("image/webp")) {
+          params.f = "webp";
+        } else {
+          // Browser can't cope with modern formats — drop the param so the
+          // original format is preserved by the processor.
+          delete params.f;
+        }
+      }
+
+      // q_auto[:level]: resolve to a concrete integer so the cache key is
+      // deterministic (e.g. "auto:good" → 75).
+      if (typeof params.q === "string" && params.q.startsWith("auto")) {
+        params.q = resolveQAuto(params.q);
+      }
+      // --------------------------------------------------------
 
       if (Object.keys(params).length === 0) {
         return sendOriginalImage(filePath, reply);

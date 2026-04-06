@@ -10,6 +10,19 @@ const VALID_FORMATS = new Set(["webp", "jpeg", "jpg", "png", "avif"]);
 const VALID_FITS = new Set(["cover", "contain", "fill", "inside", "outside"]);
 const VALID_FLAGS = new Set(["lossy"]);
 
+// Quality presets for q_auto — mirrors Cloudinary's naming
+const Q_AUTO_PRESETS = { eco: 45, low: 55, good: 75, best: 85 };
+
+/**
+ * Resolve a q_auto string ("auto", "auto:good", etc.) to a numeric quality.
+ * Pass-through for numbers.
+ */
+function resolveQAuto(qValue) {
+  if (typeof qValue !== "string" || !qValue.startsWith("auto")) return qValue;
+  const preset = qValue.includes(":") ? qValue.split(":")[1] : "good";
+  return Q_AUTO_PRESETS[preset] ?? Q_AUTO_PRESETS.good;
+}
+
 function isHexColor(value) {
   return /^[0-9a-fA-F]{6}$/.test(value) || /^[0-9a-fA-F]{3}$/.test(value);
 }
@@ -68,10 +81,24 @@ function parseParams(transformationString) {
         break;
       }
       case "q": {
+        // Accept auto[:eco|low|good|best] in addition to plain integers
+        if (value === "auto" || value.startsWith("auto:")) {
+          const preset = value.includes(":") ? value.split(":")[1] : "good";
+          if (
+            preset &&
+            !Object.prototype.hasOwnProperty.call(Q_AUTO_PRESETS, preset)
+          ) {
+            throw new ValidationError(
+              `Invalid q_auto level: "${preset}". Supported: eco, low, good, best`,
+            );
+          }
+          params.q = value; // kept as string; resolved to number in transform.js
+          break;
+        }
         const q = parseInt(value, 10);
         if (isNaN(q) || q < 1 || q > 100) {
           throw new ValidationError(
-            `Invalid quality: "${value}". Must be an integer between 1 and 100`,
+            `Invalid quality: "${value}". Must be an integer (1-100) or auto[:eco|low|good|best]`,
           );
         }
         params.q = q;
@@ -79,9 +106,10 @@ function parseParams(transformationString) {
       }
       case "f": {
         const f = value.toLowerCase();
-        if (!VALID_FORMATS.has(f)) {
+        // "auto" = pick best format based on the browser's Accept header
+        if (f !== "auto" && !VALID_FORMATS.has(f)) {
           throw new ValidationError(
-            `Invalid format: "${value}". Supported: ${[...VALID_FORMATS].join(", ")}`,
+            `Invalid format: "${value}". Supported: auto, ${[...VALID_FORMATS].join(", ")}`,
           );
         }
         params.f = f;
@@ -121,4 +149,4 @@ function parseParams(transformationString) {
   return params;
 }
 
-module.exports = { parseParams, ValidationError };
+module.exports = { parseParams, resolveQAuto, Q_AUTO_PRESETS, ValidationError };

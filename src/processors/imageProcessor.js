@@ -43,17 +43,23 @@ async function processImage(inputBuffer, params) {
 
   // Format conversion
   const format = params.f ? FORMAT_MAP[params.f] : null;
-  const formatOptions = {};
+  const quality = params.q || undefined;
 
-  if (params.q) {
-    formatOptions.quality = params.q;
-  }
-
-  // fl_lossy on PNG: convert to webp or use quality hint
+  // fl_lossy on PNG: re-encode as PNG with quality hint
   if (params.fl_lossy && (!format || format === "png")) {
-    pipeline = pipeline.png({ quality: params.q || 80, effort: 10 });
+    pipeline = pipeline.png({ quality: quality || 80, effort: 10 });
+  } else if (format === "jpeg") {
+    // mozjpeg produces ~10% smaller files at the same quality, free of charge
+    pipeline = pipeline.jpeg({ mozjpeg: true, quality });
+  } else if (format === "webp") {
+    // effort 4 (default) balances encode speed vs compression ratio
+    pipeline = pipeline.webp({ effort: 4, quality });
+  } else if (format === "avif") {
+    // effort 4 is a reasonable middle-ground; push to 6 for better compression
+    // at the cost of ~2x encode time
+    pipeline = pipeline.avif({ effort: 4, quality });
   } else if (format) {
-    pipeline = pipeline.toFormat(format, formatOptions);
+    pipeline = pipeline.toFormat(format, quality ? { quality } : {});
   }
 
   const buffer = await pipeline.toBuffer();

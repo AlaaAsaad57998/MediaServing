@@ -4,11 +4,16 @@ const { promises: fs } = require("fs");
 const cors = require("@fastify/cors");
 const multipart = require("@fastify/multipart");
 const rateLimit = require("@fastify/rate-limit");
+const sharp = require("sharp");
 const { authHook } = require("./middleware/auth");
 const uploadRoutes = require("./api/upload");
 const transformRoutes = require("./api/transform");
 const { createRedisClient, initRedis } = require("./services/lockService");
 const { ValidationError } = require("./utils/paramParser");
+
+// Tune libvips internal cache so Sharp reuses decoded frames across requests.
+// memory: MB of decoded pixel data to keep; items: max number of cached ops.
+sharp.cache({ memory: 128, files: 20, items: 500 });
 
 const TEST_PAGE_PATH = path.resolve(__dirname, "..", "test.html");
 const COMPARE_PAGE_PATH = path.resolve(__dirname, "..", "compare.html");
