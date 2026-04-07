@@ -20,8 +20,9 @@ services:
     # All secrets come from .env.production on the host — never baked into the image.
     env_file: .env.production
 
+    # ADMIN: ensure port 4001 is open in the firewall / security-group rules.
     ports:
-      - "3000:3000"
+      - "4001:3000"
 
     mem_reservation: 256m
     mem_limit: 512m
