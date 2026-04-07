@@ -1,13 +1,4 @@
 # Production deployment
-#
-# Prerequisites on the server:
-#   1. Create .env.production next to this file (it is gitignored — never commit it).
-#      Copy .env.production from the repo template and fill in all real values.
-#   2. docker compose -f docker-compose.prod.yml up -d --build
-#
-# External services (not managed here — configure via .env.production):
-#   • AWS S3 (S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_REGION, S3_BUCKET)
-#   • Redis   (REDIS_URL, REDIS_USERNAME, REDIS_PASS)
 
 services:
   app:
@@ -17,7 +8,6 @@ services:
     image: media-serving:latest
     restart: unless-stopped
 
-    # All secrets come from .env.production on the host — never baked into the image.
     env_file: .env.production
 
     # ADMIN: ensure port 4001 is open in the firewall / security-group rules.
