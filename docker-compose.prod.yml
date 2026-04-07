@@ -23,6 +23,11 @@ services:
     ports:
       - "3000:3000"
 
+    mem_reservation: 256m
+    mem_limit: 512m
+    cpus: "1.00"
+    pids_limit: 200
+
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
       interval: 30s
