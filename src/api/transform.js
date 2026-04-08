@@ -196,19 +196,10 @@ async function transformRoutes(fastify) {
       throw err;
     }
 
-    // --- Resolve auto values BEFORE cache-key generation ---
-    // Only images reach this code path. Video requests are handled above
-    // through target-only routing.
-    if (params.f === "auto") {
-      const accept = request.headers["accept"] || "";
-      if (accept.includes("image/avif")) {
-        params.f = "avif";
-      } else if (accept.includes("image/webp")) {
-        params.f = "webp";
-      } else {
-        delete params.f;
-      }
-    }
+    // --- Resolve values BEFORE cache-key generation ---
+    // Only images reach this code path. Force image output format to WebP,
+    // regardless of what the client sends in f_.
+    params.f = "webp";
 
     // q_auto[:level]: resolve to a concrete integer so the cache key is
     // deterministic (e.g. "auto:good" -> 75).
