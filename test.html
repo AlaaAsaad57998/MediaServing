@@ -3,303 +3,330 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MediaServing — Test Panel</title>
+    <title>MediaServing Test Panel</title>
     <style>
       * {
         box-sizing: border-box;
-        margin: 0;
-        padding: 0;
       }
       body {
-        font-family: system-ui, sans-serif;
-        background: #0f172a;
-        color: #e2e8f0;
-        padding: 2rem;
-      }
-      h1 {
-        font-size: 1.5rem;
-        margin-bottom: 1.5rem;
-        color: #38bdf8;
-      }
-      h2 {
-        font-size: 1.1rem;
-        margin-bottom: 1rem;
-        color: #94a3b8;
-        border-bottom: 1px solid #1e293b;
-        padding-bottom: 0.5rem;
+        margin: 0;
+        font-family: "Segoe UI", Tahoma, sans-serif;
+        background: linear-gradient(180deg, #0a101d 0%, #101a2f 100%);
+        color: #dbe6ff;
       }
       .container {
-        max-width: 900px;
+        max-width: 1080px;
         margin: 0 auto;
+        padding: 24px;
+      }
+      h1 {
+        margin: 0 0 14px;
+        color: #7dd3fc;
+      }
+      .sub {
+        color: #8ea0c7;
+        margin-bottom: 18px;
       }
       .card {
-        background: #1e293b;
-        border-radius: 8px;
-        padding: 1.5rem;
-        margin-bottom: 1.5rem;
+        background: #121e33;
+        border: 1px solid #23365f;
+        border-radius: 12px;
+        padding: 16px;
+        margin-bottom: 16px;
+      }
+      h2 {
+        font-size: 18px;
+        margin: 0 0 12px;
+        color: #9ad2ff;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+      }
+      @media (max-width: 820px) {
+        .grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+      @media (max-width: 520px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
       }
       label {
         display: block;
-        font-size: 0.85rem;
-        color: #94a3b8;
-        margin-bottom: 0.3rem;
+        font-size: 12px;
+        color: #9bb2df;
+        margin-bottom: 4px;
       }
       input,
-      select {
+      select,
+      button,
+      textarea {
         width: 100%;
-        padding: 0.5rem;
-        border: 1px solid #334155;
-        border-radius: 4px;
-        background: #0f172a;
-        color: #e2e8f0;
-        font-size: 0.9rem;
-        margin-bottom: 0.8rem;
+        border-radius: 8px;
+        border: 1px solid #2c467a;
+        background: #0d1527;
+        color: #e6efff;
+        padding: 8px 10px;
+        font-size: 14px;
       }
-      input[type="file"] {
-        padding: 0.4rem;
+      textarea {
+        min-height: 70px;
+      }
+      button {
+        cursor: pointer;
+        background: #1d4ed8;
+        border-color: #2f64f0;
+        font-weight: 600;
+      }
+      button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
       }
       .row {
         display: flex;
-        gap: 0.8rem;
+        gap: 10px;
         flex-wrap: wrap;
       }
-      .row > div {
+      .row > * {
         flex: 1;
-        min-width: 120px;
-      }
-      button {
-        background: #2563eb;
-        color: #fff;
-        border: none;
-        padding: 0.6rem 1.5rem;
-        border-radius: 4px;
-        font-size: 0.9rem;
-        cursor: pointer;
-        margin-top: 0.5rem;
-      }
-      button:hover {
-        background: #1d4ed8;
-      }
-      button:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
+        min-width: 190px;
       }
       .result {
-        margin-top: 1rem;
-        padding: 1rem;
-        background: #0f172a;
-        border-radius: 4px;
-        font-family: monospace;
-        font-size: 0.85rem;
+        margin-top: 10px;
         white-space: pre-wrap;
-        word-break: break-all;
-        max-height: 200px;
-        overflow-y: auto;
+        word-break: break-word;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        background: #0b1222;
+        border: 1px solid #20345d;
+        padding: 10px;
+        border-radius: 8px;
         display: none;
       }
       .result.show {
         display: block;
       }
-      .result.error {
-        border-left: 3px solid #ef4444;
-      }
-      .result.success {
-        border-left: 3px solid #22c55e;
+      .url {
+        margin-top: 8px;
+        font-size: 12px;
+        color: #7dd3fc;
+        word-break: break-all;
       }
       .preview {
-        margin-top: 1rem;
-        text-align: center;
-        display: none;
+        margin-top: 10px;
       }
-      .preview.show {
-        display: block;
+      .preview img,
+      .preview video {
+        width: 100%;
+        max-height: 420px;
+        border-radius: 10px;
+        border: 1px solid #2b4679;
+        background: #000;
       }
-      .preview img {
-        max-width: 100%;
-        max-height: 400px;
-        border-radius: 4px;
-        border: 1px solid #334155;
+      .meta {
+        font-size: 12px;
+        color: #8aa0c8;
+        margin-top: 6px;
       }
-      .preview .meta {
-        font-size: 0.8rem;
-        color: #64748b;
-        margin-top: 0.5rem;
-      }
-      .api-key-bar {
-        display: flex;
-        gap: 0.8rem;
-        align-items: end;
-        margin-bottom: 1.5rem;
-      }
-      .api-key-bar > div {
-        flex: 1;
-      }
-      .api-key-bar label {
-        margin-bottom: 0.3rem;
-      }
-      .api-key-bar input {
-        margin-bottom: 0;
-      }
-      .status {
+      .pill {
         display: inline-block;
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        margin-right: 0.4rem;
-      }
-      .status.green {
-        background: #22c55e;
-      }
-      .status.red {
-        background: #ef4444;
-      }
-      .health-check {
-        font-size: 0.85rem;
-        color: #64748b;
-      }
-      .config-note {
-        font-size: 0.82rem;
-        color: #94a3b8;
-        margin-top: 0.5rem;
+        background: #102140;
+        border: 1px solid #2f4f8f;
+        color: #9cc0ff;
+        padding: 4px 8px;
+        border-radius: 999px;
+        margin-right: 6px;
+        font-size: 12px;
       }
     </style>
   </head>
   <body>
     <div class="container">
-      <h1>MediaServing — Test Panel</h1>
-
-      <!-- API Key + Health -->
-      <div class="card">
-        <div class="api-key-bar">
-          <div style="flex: 1">
-            <label>Base URL (auto)</label>
-            <div id="baseUrl" style="padding: 0.5rem; font-size: 0.9rem">-</div>
-          </div>
-          <div style="flex: 0">
-            <button onclick="checkHealth()">Health</button>
-          </div>
-        </div>
-        <div class="config-note" id="apiKeyStatus"></div>
-        <div class="health-check" id="healthResult"></div>
+      <h1>MediaServing Test Panel</h1>
+      <div class="sub">
+        Images use Cloudinary-style transforms, while videos use target
+        variants:
+        <code>/video/upload/{public_id}?target=preview|snapshot</code>
       </div>
 
-      <!-- Upload Section -->
+      <div class="card">
+        <div class="row">
+          <div>
+            <span class="pill">Base URL</span>
+            <div id="baseUrl"></div>
+          </div>
+          <div>
+            <span class="pill">API Key</span>
+            <div id="apiStatus"></div>
+          </div>
+          <div>
+            <button onclick="checkHealth()">Health Check</button>
+          </div>
+        </div>
+        <div class="result" id="healthResult"></div>
+      </div>
+
       <div class="card">
         <h2>Upload Image</h2>
         <div class="row">
-          <div style="flex: 2">
-            <label for="uploadFile">Image File</label>
-            <input type="file" id="uploadFile" accept="image/*" />
+          <div>
+            <label>Image file</label>
+            <input id="imageUploadFile" type="file" accept="image/*" />
           </div>
-          <div style="flex: 1">
-            <label for="uploadFolder">Folder (optional)</label>
-            <input type="text" id="uploadFolder" placeholder="e.g. avatars" />
+          <div>
+            <label>Folder (optional)</label>
+            <input
+              id="imageUploadFolder"
+              type="text"
+              placeholder="e.g. avatars"
+            />
           </div>
         </div>
-        <button id="uploadBtn" onclick="uploadFile()">Upload</button>
-        <div class="result" id="uploadResult"></div>
-      </div>
-
-      <!-- Bulk upload -->
-      <div class="card">
-        <h2>Bulk upload images</h2>
-        <p class="config-note" style="margin-bottom: 0.8rem">
-          Uses <code style="color: #94a3b8">POST /upload/bulk</code>. Field name
-          <code style="color: #94a3b8">files</code> (multiple). Optional
-          <code style="color: #94a3b8">folder</code> is taken from the folder
-          field above (sent first so it applies to all files).
-        </p>
-        <div>
-          <label for="bulkFiles">Image files (multiple)</label>
-          <input type="file" id="bulkFiles" accept="image/*" multiple />
-        </div>
-        <button id="bulkUploadBtn" onclick="bulkUploadFiles()">
-          Upload all
+        <button id="uploadImageBtn" onclick="uploadMedia('image')">
+          Upload Image
         </button>
-        <div class="result" id="bulkUploadResult"></div>
+        <div class="result" id="uploadImageResult"></div>
       </div>
 
-      <!-- Transform Section -->
       <div class="card">
-        <h2>Transform & View Image</h2>
-        <div>
-          <label for="filePath">File Path (without originals/ prefix)</label>
-          <input
-            type="text"
-            id="filePath"
-            placeholder="e.g. photo.jpg or avatars/photo.jpg"
-          />
-        </div>
-        <div class="row">
+        <h2>Transform Image</h2>
+        <div class="grid">
           <div>
-            <label for="paramW">Width (w)</label>
+            <label>Image path/public_id</label>
             <input
+              id="imgPath"
+              type="text"
+              placeholder="e.g. avatars/photo.jpg"
+            />
+          </div>
+          <div>
+            <label>w</label>
+            <input
+              id="imgW"
               type="number"
-              id="paramW"
-              placeholder="300"
               min="1"
               max="10000"
+              placeholder="800"
             />
           </div>
           <div>
-            <label for="paramH">Height (h)</label>
+            <label>h</label>
             <input
+              id="imgH"
               type="number"
-              id="paramH"
-              placeholder="300"
               min="1"
               max="10000"
+              placeholder="600"
             />
           </div>
           <div>
-            <label for="paramQ">Quality (q)</label>
-            <input
-              type="number"
-              id="paramQ"
-              placeholder="80"
-              min="1"
-              max="100"
-            />
+            <label>c</label>
+            <select id="imgC">
+              <option value="">(none)</option>
+              <option value="fill">fill</option>
+              <option value="pad">pad</option>
+              <option value="fit">fit</option>
+              <option value="scale">scale</option>
+              <option value="crop">crop</option>
+            </select>
           </div>
           <div>
-            <label for="paramF">Format (f)</label>
-            <select id="paramF">
-              <option value="">— original —</option>
-              <option value="webp" selected>webp</option>
+            <label>b</label>
+            <select id="imgB">
+              <option value="">(none)</option>
+              <option value="auto">auto</option>
+              <option value="000000">000000</option>
+              <option value="ffffff">ffffff</option>
+            </select>
+          </div>
+          <div>
+            <label>f</label>
+            <select id="imgF">
+              <option value="">(none)</option>
+              <option value="auto">auto</option>
+              <option value="webp">webp</option>
+              <option value="avif">avif</option>
               <option value="jpeg">jpeg</option>
               <option value="png">png</option>
-              <option value="avif">avif</option>
             </select>
           </div>
           <div>
-            <label for="paramC">Fit (c)</label>
-            <select id="paramC">
-              <option value="">— default —</option>
-              <option value="cover">cover</option>
-              <option value="contain">contain</option>
-              <option value="fill">fill</option>
-              <option value="inside">inside</option>
-              <option value="outside">outside</option>
+            <label>q</label>
+            <input id="imgQ" type="text" placeholder="auto:good or 80" />
+          </div>
+          <div>
+            <label>fl</label>
+            <select id="imgLossy">
+              <option value="">(none)</option>
+              <option value="lossy">lossy</option>
             </select>
           </div>
         </div>
-        <div style="margin-top: 0.5rem">
-          <label><input type="checkbox" id="paramLossy" /> fl_lossy</label>
-        </div>
-        <div style="margin-top: 0.8rem; font-size: 0.85rem; color: #64748b">
-          URL: <span id="transformUrl" style="color: #38bdf8">—</span>
-        </div>
-        <button
-          id="transformBtn"
-          onclick="transformImage()"
-          style="margin-top: 0.8rem"
-        >
-          Transform & View
+        <div class="url" id="imgUrlPreview">-</div>
+        <button id="transformImageBtn" onclick="transformMedia('image')">
+          Transform Image
         </button>
-        <div class="result" id="transformResult"></div>
-        <div class="preview" id="transformPreview">
-          <img id="previewImg" alt="Transformed image" />
-          <div class="meta" id="previewMeta"></div>
+        <div class="result" id="transformImageResult"></div>
+        <div class="preview" id="imagePreviewWrap" style="display: none">
+          <img id="imagePreview" alt="image preview" />
+          <div class="meta" id="imageMeta"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Upload Video</h2>
+        <div class="row">
+          <div>
+            <label>Video file</label>
+            <input id="videoUploadFile" type="file" accept="video/*" />
+          </div>
+          <div>
+            <label>Folder (optional)</label>
+            <input
+              id="videoUploadFolder"
+              type="text"
+              placeholder="e.g. demos"
+            />
+          </div>
+        </div>
+        <button id="uploadVideoBtn" onclick="uploadMedia('video')">
+          Upload Video
+        </button>
+        <div class="result" id="uploadVideoResult"></div>
+        <div class="url" id="videoInstances">-</div>
+      </div>
+
+      <div class="card">
+        <h2>Transform Video</h2>
+        <div class="grid">
+          <div>
+            <label>Video path/public_id</label>
+            <input id="vidPath" type="text" placeholder="e.g. demos/clip.mp4" />
+          </div>
+          <div>
+            <label>target</label>
+            <select id="vidTarget">
+              <option value="">full</option>
+              <option value="preview">preview</option>
+              <option value="snapshot">snapshot</option>
+            </select>
+          </div>
+        </div>
+        <div class="url" id="vidUrlPreview">-</div>
+        <button id="transformVideoBtn" onclick="transformMedia('video')">
+          Transform Video
+        </button>
+        <div class="result" id="transformVideoResult"></div>
+        <div class="preview" id="videoPreviewWrap" style="display: none">
+          <video id="videoPreview" controls playsinline></video>
+          <img
+            id="videoImagePreview"
+            alt="video snapshot preview"
+            style="display: none"
+          />
+          <div class="meta" id="videoMeta"></div>
         </div>
       </div>
     </div>
@@ -311,258 +338,294 @@
         return window.location.origin.replace(/\/+$/, "");
       }
 
-      function getKey() {
+      function getApiKey() {
         return window.__TEST_API_KEY__ || "";
       }
 
-      // Build transformation string from form inputs
-      function buildTransformations() {
-        const parts = [];
-        const w = document.getElementById("paramW").value;
-        const h = document.getElementById("paramH").value;
-        const q = document.getElementById("paramQ").value;
-        const f = document.getElementById("paramF").value;
-        const c = document.getElementById("paramC").value;
-        const lossy = document.getElementById("paramLossy").checked;
-        if (w) parts.push("w_" + w);
-        if (h) parts.push("h_" + h);
-        if (q) parts.push("q_" + q);
-        if (f) parts.push("f_" + f);
-        if (c) parts.push("c_" + c);
-        if (lossy) parts.push("fl_lossy");
-        return parts.join(",");
-      }
-
-      // Update URL preview on input change
-      function updateUrlPreview() {
-        const t = buildTransformations();
-        const fp = document.getElementById("filePath").value;
-        if (fp) {
-          const url = t
-            ? getBase() + "/media/upload/" + t + "/" + fp
-            : getBase() + "/media/upload/" + fp;
-          document.getElementById("transformUrl").textContent = url;
-        } else {
-          document.getElementById("transformUrl").textContent = "—";
-        }
-      }
-
-      function initConfigSummary() {
-        document.getElementById("baseUrl").textContent = getBase();
-        document.getElementById("apiKeyStatus").textContent = getKey()
-          ? "API key loaded from server env"
-          : "API key not set in server env";
-      }
-      document
-        .querySelectorAll(
-          "#filePath, #paramW, #paramH, #paramQ, #paramF, #paramC, #paramLossy",
-        )
-        .forEach((el) => {
-          el.addEventListener("input", updateUrlPreview);
-          el.addEventListener("change", updateUrlPreview);
-        });
-
-      function showResult(id, text, isError) {
+      function showResult(id, text) {
         const el = document.getElementById(id);
         el.textContent = text;
-        el.className = "result show " + (isError ? "error" : "success");
+        el.classList.add("show");
       }
 
-      async function checkHealth() {
-        const el = document.getElementById("healthResult");
-        try {
-          const res = await fetch(getBase() + "/health");
-          const data = await res.json();
-          el.innerHTML =
-            '<span class="status green"></span> Connected — ' +
-            JSON.stringify(data);
-        } catch (e) {
-          el.innerHTML =
-            '<span class="status red"></span> Cannot reach server: ' +
-            e.message;
-        }
-      }
-
-      async function bulkUploadFiles() {
-        const fileInput = document.getElementById("bulkFiles");
-        const folder = document.getElementById("uploadFolder").value.trim();
-        const btn = document.getElementById("bulkUploadBtn");
-
-        if (!fileInput.files.length) {
-          showResult("bulkUploadResult", "Please select one or more files", true);
+      function renderVideoInstances(variants) {
+        const el = document.getElementById("videoInstances");
+        if (!variants) {
+          el.textContent = "-";
           return;
         }
 
-        const form = new FormData();
-        if (folder) {
-          form.append("folder", folder);
-        }
-        for (let i = 0; i < fileInput.files.length; i++) {
-          form.append("files", fileInput.files[i]);
-        }
+        const fullPath = variants.full || variants.video || "";
+        const previewPath = variants.preview || "";
+        const snapshotPath = variants.snapshot || "";
 
-        btn.disabled = true;
-        btn.textContent = "Uploading...";
+        const fullUrl = fullPath ? getBase() + fullPath : "-";
+        const previewUrl = previewPath ? getBase() + previewPath : "-";
+        const snapshotUrl = snapshotPath ? getBase() + snapshotPath : "-";
+
+        el.innerHTML =
+          "Instances after upload:" +
+          "<br>1. full (video/webm): " +
+          fullUrl +
+          "<br>2. preview (video/webm, 10s): " +
+          previewUrl +
+          "<br>3. snapshot (image/webp): " +
+          snapshotUrl;
+      }
+
+      function buildMediaUrl(resourceType, transformations, publicId) {
+        if (!publicId) return null;
+        const base = getBase();
+        if (transformations) {
+          return (
+            base +
+            "/" +
+            resourceType +
+            "/upload/" +
+            transformations +
+            "/" +
+            publicId
+          );
+        }
+        return base + "/" + resourceType + "/upload/" + publicId;
+      }
+
+      function buildVideoTargetUrl(publicId) {
+        if (!publicId) return null;
+        const target = document.getElementById("vidTarget").value;
+        const base = getBase() + "/video/upload/" + publicId;
+        return target ? base + "?target=" + encodeURIComponent(target) : base;
+      }
+
+      function buildImageTransform() {
+        const parts = [];
+        const w = document.getElementById("imgW").value.trim();
+        const h = document.getElementById("imgH").value.trim();
+        const c = document.getElementById("imgC").value;
+        const b = document.getElementById("imgB").value;
+        const f = document.getElementById("imgF").value;
+        const q = document.getElementById("imgQ").value.trim();
+        const lossy = document.getElementById("imgLossy").value;
+
+        if (w) parts.push("w_" + w);
+        if (h) parts.push("h_" + h);
+        if (c) parts.push("c_" + c);
+        if (b) parts.push("b_" + b);
+        if (f) parts.push("f_" + f);
+        if (q) parts.push("q_" + q);
+        if (lossy) parts.push("fl_" + lossy);
+
+        return parts.join(",");
+      }
+
+      function refreshPreviews() {
+        const imgPath = document.getElementById("imgPath").value.trim();
+        const vidPath = document.getElementById("vidPath").value.trim();
+
+        document.getElementById("imgUrlPreview").textContent =
+          buildMediaUrl("image", buildImageTransform(), imgPath) || "-";
+
+        document.getElementById("vidUrlPreview").textContent =
+          buildVideoTargetUrl(vidPath) || "-";
+      }
+
+      async function checkHealth() {
         try {
-          const res = await fetch(getBase() + "/upload/bulk", {
-            method: "POST",
-            headers: { "X-API-Key": getKey() },
-            body: form,
-          });
+          const res = await fetch(getBase() + "/health");
           const data = await res.json();
-          if (res.ok) {
-            showResult(
-              "bulkUploadResult",
-              "Status: " + res.status + "\n" + JSON.stringify(data, null, 2),
-              false,
-            );
-            if (data.items && data.items.length > 0) {
-              const last = data.items[data.items.length - 1];
-              const relativePath = last.key.replace(/^originals\//, "");
-              document.getElementById("filePath").value = relativePath;
-              updateUrlPreview();
-            }
-          } else {
-            showResult(
-              "bulkUploadResult",
-              "Status: " + res.status + "\n" + JSON.stringify(data, null, 2),
-              true,
-            );
-          }
-        } catch (e) {
-          showResult("bulkUploadResult", "Error: " + e.message, true);
-        } finally {
-          btn.disabled = false;
-          btn.textContent = "Upload all";
+          showResult("healthResult", "OK " + JSON.stringify(data));
+        } catch (err) {
+          showResult("healthResult", "ERROR " + err.message);
         }
       }
 
-      async function uploadFile() {
-        const fileInput = document.getElementById("uploadFile");
-        const folder = document.getElementById("uploadFolder").value.trim();
-        const btn = document.getElementById("uploadBtn");
+      async function uploadMedia(type) {
+        const isVideo = type === "video";
+        const fileInput = document.getElementById(
+          isVideo ? "videoUploadFile" : "imageUploadFile",
+        );
+        const folderInput = document.getElementById(
+          isVideo ? "videoUploadFolder" : "imageUploadFolder",
+        );
+        const resultId = isVideo ? "uploadVideoResult" : "uploadImageResult";
+        const btn = document.getElementById(
+          isVideo ? "uploadVideoBtn" : "uploadImageBtn",
+        );
 
         if (!fileInput.files.length) {
-          showResult("uploadResult", "Please select a file", true);
+          showResult(resultId, "Please select a file");
           return;
         }
 
         const form = new FormData();
         form.append("file", fileInput.files[0]);
+        const folder = folderInput.value.trim();
         if (folder) form.append("folder", folder);
 
         btn.disabled = true;
         btn.textContent = "Uploading...";
+
         try {
           const res = await fetch(getBase() + "/upload", {
             method: "POST",
-            headers: { "X-API-Key": getKey() },
+            headers: { "X-API-Key": getApiKey() },
             body: form,
           });
+
           const data = await res.json();
-          if (res.ok) {
-            showResult(
-              "uploadResult",
-              "Status: " + res.status + "\n" + JSON.stringify(data, null, 2),
-              false,
-            );
-            // Auto-fill transform path
-            const relativePath = data.key.replace(/^originals\//, "");
-            document.getElementById("filePath").value = relativePath;
-            updateUrlPreview();
-          } else {
-            showResult(
-              "uploadResult",
-              "Status: " + res.status + "\n" + JSON.stringify(data, null, 2),
-              true,
-            );
+          showResult(
+            resultId,
+            "Status: " + res.status + "\n" + JSON.stringify(data, null, 2),
+          );
+
+          if (res.ok && data.key) {
+            const publicId = data.key.replace(/^originals\//, "");
+            if (isVideo) {
+              document.getElementById("vidPath").value = publicId;
+              renderVideoInstances(data.variants);
+            } else {
+              document.getElementById("imgPath").value = publicId;
+            }
+            refreshPreviews();
           }
-        } catch (e) {
-          showResult("uploadResult", "Error: " + e.message, true);
+        } catch (err) {
+          showResult(resultId, "Error: " + err.message);
         } finally {
           btn.disabled = false;
-          btn.textContent = "Upload";
+          btn.textContent = isVideo ? "Upload Video" : "Upload Image";
         }
       }
 
-      async function transformImage() {
-        const fp = document.getElementById("filePath").value.trim();
-        const t = buildTransformations();
-        const btn = document.getElementById("transformBtn");
+      async function transformMedia(type) {
+        const isVideo = type === "video";
+        const publicId = document
+          .getElementById(isVideo ? "vidPath" : "imgPath")
+          .value.trim();
 
-        if (!fp) {
-          showResult("transformResult", "Enter a file path first", true);
+        if (!publicId) {
+          showResult(
+            isVideo ? "transformVideoResult" : "transformImageResult",
+            "Please provide path/public_id first",
+          );
           return;
         }
 
-        const url = t
-          ? getBase() + "/media/upload/" + t + "/" + fp
-          : getBase() + "/media/upload/" + fp;
+        const url = isVideo
+          ? buildVideoTargetUrl(publicId)
+          : buildMediaUrl("image", buildImageTransform(), publicId);
+        const resultId = isVideo
+          ? "transformVideoResult"
+          : "transformImageResult";
+        const btn = document.getElementById(
+          isVideo ? "transformVideoBtn" : "transformImageBtn",
+        );
+
         btn.disabled = true;
-        btn.textContent = t ? "Processing..." : "Fetching Original...";
+        btn.textContent = "Fetching...";
+
         try {
           const res = await fetch(url, {
-            headers: { "X-API-Key": getKey() },
+            headers: { "X-API-Key": getApiKey() },
           });
 
           if (!res.ok) {
-            const data = await res.json();
-            showResult(
-              "transformResult",
-              "Status: " + res.status + "\n" + JSON.stringify(data, null, 2),
-              true,
-            );
-            document.getElementById("transformPreview").className = "preview";
+            const errorBody = await res.text();
+            showResult(resultId, "Status: " + res.status + "\n" + errorBody);
             return;
           }
 
-          const cacheStatus = res.headers.get("X-Cache") || "unknown";
-          const contentType = res.headers.get("Content-Type") || "unknown";
+          const cache = res.headers.get("X-Cache") || "-";
+          const ct = res.headers.get("Content-Type") || "-";
           const blob = await res.blob();
 
           showResult(
-            "transformResult",
+            resultId,
             "Status: " +
               res.status +
-              " | Cache: " +
-              cacheStatus +
-              " | Type: " +
-              contentType +
-              " | Size: " +
+              "\nType: " +
+              ct +
+              "\nCache: " +
+              cache +
+              "\nSize: " +
               (blob.size / 1024).toFixed(1) +
-              " KB",
-            false,
+              " KB\nURL: " +
+              url,
           );
 
-          const imgUrl = URL.createObjectURL(blob);
-          const previewImg = document.getElementById("previewImg");
-          previewImg.onload = function () {
-            document.getElementById("previewMeta").textContent =
-              this.naturalWidth +
-              "×" +
-              this.naturalHeight +
-              " | " +
-              contentType +
+          if (isVideo) {
+            const isImage = (ct || "").toLowerCase().startsWith("image/");
+            const video = document.getElementById("videoPreview");
+            const image = document.getElementById("videoImagePreview");
+            if (isImage) {
+              video.style.display = "none";
+              image.src = URL.createObjectURL(blob);
+              image.style.display = "block";
+            } else {
+              image.style.display = "none";
+              video.src = URL.createObjectURL(blob);
+              video.style.display = "block";
+            }
+            document.getElementById("videoMeta").textContent =
+              ct +
               " | " +
               (blob.size / 1024).toFixed(1) +
               " KB | Cache: " +
-              cacheStatus;
-          };
-          previewImg.src = imgUrl;
-          document.getElementById("transformPreview").className =
-            "preview show";
-        } catch (e) {
-          showResult("transformResult", "Error: " + e.message, true);
-          document.getElementById("transformPreview").className = "preview";
+              cache;
+            document.getElementById("videoPreviewWrap").style.display = "block";
+          } else {
+            const img = document.getElementById("imagePreview");
+            img.onload = function () {
+              document.getElementById("imageMeta").textContent =
+                this.naturalWidth +
+                "x" +
+                this.naturalHeight +
+                " | " +
+                ct +
+                " | " +
+                (blob.size / 1024).toFixed(1) +
+                " KB | Cache: " +
+                cache;
+            };
+            img.src = URL.createObjectURL(blob);
+            document.getElementById("imagePreviewWrap").style.display = "block";
+          }
+        } catch (err) {
+          showResult(resultId, "Error: " + err.message);
         } finally {
           btn.disabled = false;
-          btn.textContent = "Transform & View";
+          btn.textContent = isVideo ? "Transform Video" : "Transform Image";
         }
       }
 
-      // Initial health check
-      initConfigSummary();
-      checkHealth();
+      function bindPreviewEvents() {
+        [
+          "imgPath",
+          "imgW",
+          "imgH",
+          "imgC",
+          "imgB",
+          "imgF",
+          "imgQ",
+          "imgLossy",
+          "vidPath",
+          "vidTarget",
+        ].forEach((id) => {
+          const el = document.getElementById(id);
+          if (!el) return;
+          el.addEventListener("input", refreshPreviews);
+          el.addEventListener("change", refreshPreviews);
+        });
+      }
+
+      (function init() {
+        document.getElementById("baseUrl").textContent = getBase();
+        document.getElementById("apiStatus").textContent = getApiKey()
+          ? "Loaded from env"
+          : "Missing in env";
+        bindPreviewEvents();
+        refreshPreviews();
+        checkHealth();
+      })();
     </script>
   </body>
 </html>

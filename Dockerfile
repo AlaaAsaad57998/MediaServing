@@ -3,7 +3,7 @@
 # ── Stage 0: base ────────────────────────────────────────────────────────────
 FROM node:22-alpine AS base
 WORKDIR /app
-RUN apk add --no-cache dumb-init
+RUN apk add --no-cache dumb-init ffmpeg
 
 # ── Stage 1: install production dependencies ────────────────────────────────
 FROM base AS deps

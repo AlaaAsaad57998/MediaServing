@@ -1,6 +1,11 @@
 const { putObject } = require("../storage/s3Client");
 const path = require("path");
 const mime = require("mime-types");
+const { isVideoFile } = require("../utils/paramParser");
+const {
+  preprocessVideo,
+  getVariantUrls,
+} = require("../services/videoPreprocessor");
 
 function resolveExtension(filename, mimetype) {
   const originalExt = path
@@ -22,11 +27,21 @@ async function saveUploadedImage(buffer, filename, mimetype, folder) {
 
   const relativePath = key.replace(/^originals\//, "");
 
-  return {
+  const isVideo = isVideoFile(filename, mimetype);
+  const resourceType = isVideo ? "video" : "image";
+
+  const result = {
     key,
     size: buffer.length,
-    url: `/media/upload/f_webp/${relativePath}`,
+    type: resourceType,
+    url: `/${resourceType}/upload/${relativePath}`,
   };
+
+  if (isVideo) {
+    result.variants = getVariantUrls(relativePath);
+  }
+
+  return result;
 }
 
 const uploadRateLimit = {
@@ -37,9 +52,14 @@ const uploadRateLimit = {
   ),
 };
 
+const maxFileSize =
+  Number.parseInt(process.env.UPLOAD_MAX_FILE_SIZE_MB || "100", 10) *
+  1024 *
+  1024;
+
 const bulkMultipartLimits = {
   files: Number.parseInt(process.env.UPLOAD_BULK_MAX_FILES || "50", 10),
-  fileSize: 10 * 1024 * 1024,
+  fileSize: maxFileSize,
 };
 
 async function uploadRoutes(fastify) {
@@ -76,6 +96,19 @@ async function uploadRoutes(fastify) {
         folder,
       );
 
+      if (item.type === "video") {
+        preprocessVideo(
+          item.key,
+          item.key.replace(/^originals\//, ""),
+          request.log,
+        ).catch((err) => {
+          request.log.error(
+            { error: err.message },
+            "Background video preprocessing failed",
+          );
+        });
+      }
+
       return reply.code(201).send(item);
     },
   );
@@ -111,7 +144,9 @@ async function uploadRoutes(fastify) {
         const buffer = await part.toBuffer();
 
         if (buffer.length === 0) {
-          return reply.code(400).send({ error: "One or more uploaded files are empty" });
+          return reply
+            .code(400)
+            .send({ error: "One or more uploaded files are empty" });
         }
 
         const item = await saveUploadedImage(
@@ -120,6 +155,20 @@ async function uploadRoutes(fastify) {
           part.mimetype,
           folder,
         );
+
+        if (item.type === "video") {
+          preprocessVideo(
+            item.key,
+            item.key.replace(/^originals\//, ""),
+            request.log,
+          ).catch((err) => {
+            request.log.error(
+              { error: err.message },
+              "Background video preprocessing failed",
+            );
+          });
+        }
+
         items.push(item);
       }
 

@@ -6,9 +6,20 @@ class ValidationError extends Error {
   }
 }
 
-const VALID_FORMATS = new Set(["webp", "jpeg", "jpg", "png", "avif"]);
-const VALID_FITS = new Set(["cover", "contain", "fill", "inside", "outside"]);
+const VALID_IMAGE_FORMATS = new Set(["webp", "jpeg", "jpg", "png", "avif"]);
+const VALID_VIDEO_FORMATS = new Set(["mp4", "webm"]);
+const VALID_FORMATS = new Set([...VALID_IMAGE_FORMATS, ...VALID_VIDEO_FORMATS]);
+// Canonical Cloudinary-style crop modes we expose in URLs.
+const VALID_FITS = new Set(["fill", "pad", "fit", "scale", "crop"]);
+// Backward-compatible aliases that are normalized to canonical values.
+const FIT_ALIASES = {
+  cover: "fill",
+  contain: "fit",
+  inside: "fit",
+  outside: "fill",
+};
 const VALID_FLAGS = new Set(["lossy"]);
+const VALID_VIDEO_CODECS = new Set(["auto", "h264", "h265", "hevc", "vp9"]);
 
 // Quality presets for q_auto — mirrors Cloudinary's naming
 const Q_AUTO_PRESETS = { eco: 45, low: 55, good: 75, best: 85 };
@@ -116,10 +127,11 @@ function parseParams(transformationString) {
         break;
       }
       case "c": {
-        const c = value.toLowerCase();
+        const raw = value.toLowerCase();
+        const c = FIT_ALIASES[raw] || raw;
         if (!VALID_FITS.has(c)) {
           throw new ValidationError(
-            `Invalid crop/fit: "${value}". Supported: ${[...VALID_FITS].join(", ")}`,
+            `Invalid crop/fit: "${value}". Supported: ${[...VALID_FITS, ...Object.keys(FIT_ALIASES)].join(", ")}`,
           );
         }
         params.c = c;
@@ -141,6 +153,36 @@ function parseParams(transformationString) {
         params.b = `#${b}`;
         break;
       }
+      case "vc": {
+        const vc = value.toLowerCase();
+        if (!VALID_VIDEO_CODECS.has(vc)) {
+          throw new ValidationError(
+            `Invalid video codec: "${value}". Supported: ${[...VALID_VIDEO_CODECS].join(", ")}`,
+          );
+        }
+        params.vc = vc;
+        break;
+      }
+      case "so": {
+        const so = parseFloat(value);
+        if (isNaN(so) || so < 0) {
+          throw new ValidationError(
+            `Invalid start offset: "${value}". Must be a non-negative number (seconds)`,
+          );
+        }
+        params.so = so;
+        break;
+      }
+      case "eo": {
+        const eo = parseFloat(value);
+        if (isNaN(eo) || eo <= 0) {
+          throw new ValidationError(
+            `Invalid end offset: "${value}". Must be a positive number (seconds)`,
+          );
+        }
+        params.eo = eo;
+        break;
+      }
       default:
         throw new ValidationError(`Unknown parameter: "${key}"`);
     }
@@ -149,4 +191,59 @@ function parseParams(transformationString) {
   return params;
 }
 
-module.exports = { parseParams, resolveQAuto, Q_AUTO_PRESETS, ValidationError };
+const VIDEO_EXTENSIONS = new Set([
+  "mp4",
+  "webm",
+  "mov",
+  "avi",
+  "mkv",
+  "flv",
+  "wmv",
+  "m4v",
+  "3gp",
+  "ogv",
+]);
+const VIDEO_MIMETYPES = new Set([
+  "video/mp4",
+  "video/webm",
+  "video/quicktime",
+  "video/x-msvideo",
+  "video/x-matroska",
+  "video/x-flv",
+  "video/x-ms-wmv",
+  "video/3gpp",
+  "video/ogg",
+  "video/mpeg",
+]);
+
+function isVideoFile(filename, mimetype) {
+  if (mimetype && VIDEO_MIMETYPES.has(mimetype.toLowerCase())) return true;
+  if (filename) {
+    const ext = filename.split(".").pop().toLowerCase();
+    return VIDEO_EXTENSIONS.has(ext);
+  }
+  return false;
+}
+
+function isVideoPath(filePath) {
+  if (!filePath) return false;
+  const ext = filePath.split(".").pop().toLowerCase();
+  return VIDEO_EXTENSIONS.has(ext);
+}
+
+/** True when any video-only param is present */
+function hasVideoParams(params) {
+  return params.vc != null || params.so != null || params.eo != null;
+}
+
+module.exports = {
+  parseParams,
+  resolveQAuto,
+  Q_AUTO_PRESETS,
+  ValidationError,
+  isVideoFile,
+  isVideoPath,
+  hasVideoParams,
+  VALID_IMAGE_FORMATS,
+  VALID_VIDEO_FORMATS,
+};

@@ -27,9 +27,19 @@ async function processImage(inputBuffer, params) {
   const resizeOptions = {};
   if (params.w) resizeOptions.width = params.w;
   if (params.h) resizeOptions.height = params.h;
-  if (params.c) resizeOptions.fit = params.c;
 
-  if (params.c === "contain" && params.b) {
+  // Cloudinary-like crop semantics:
+  // c_fill/c_crop -> sharp cover, c_fit -> inside, c_scale -> fill (stretch), c_pad -> contain + background.
+  const fitMap = {
+    fill: "cover",
+    crop: "cover",
+    fit: "inside",
+    scale: "fill",
+    pad: "contain",
+  };
+  if (params.c) resizeOptions.fit = fitMap[params.c] || params.c;
+
+  if (params.c === "pad" && params.b) {
     if (params.b === "auto") {
       resizeOptions.background = await getAutoBackground(inputBuffer);
     } else {

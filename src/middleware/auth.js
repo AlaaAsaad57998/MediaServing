@@ -7,7 +7,9 @@ async function authHook(request, reply) {
     request.url === "/compare" ||
     request.url === "/compare.html" ||
     request.method === "OPTIONS" ||
-    request.url.includes("/media/upload/")
+    request.url.includes("/media/upload/") ||
+    request.url.includes("/image/upload/") ||
+    request.url.includes("/video/upload/")
   )
     return;
 
