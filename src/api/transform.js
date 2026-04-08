@@ -3,7 +3,6 @@ const {
   resolveQAuto,
   ValidationError,
   isVideoPath,
-  hasVideoParams,
 } = require("../utils/paramParser");
 const { generateDerivedKey } = require("../utils/hashGenerator");
 const { getObjectBuffer } = require("../storage/s3Client");
@@ -198,25 +197,16 @@ async function transformRoutes(fastify) {
     }
 
     // --- Resolve auto values BEFORE cache-key generation ---
-    const isVideo =
-      explicitResourceType === "video" ||
-      (explicitResourceType !== "image" &&
-        (isVideoPath(filePath) || hasVideoParams(params)));
-
-    // f_auto: pick the best format
+    // Only images reach this code path. Video requests are handled above
+    // through target-only routing.
     if (params.f === "auto") {
-      if (isVideo) {
-        // MP4/H264 has the widest hardware-decode support
-        params.f = "mp4";
+      const accept = request.headers["accept"] || "";
+      if (accept.includes("image/avif")) {
+        params.f = "avif";
+      } else if (accept.includes("image/webp")) {
+        params.f = "webp";
       } else {
-        const accept = request.headers["accept"] || "";
-        if (accept.includes("image/avif")) {
-          params.f = "avif";
-        } else if (accept.includes("image/webp")) {
-          params.f = "webp";
-        } else {
-          delete params.f;
-        }
+        delete params.f;
       }
     }
 
@@ -284,9 +274,11 @@ async function transformRoutes(fastify) {
         throw err;
       }
 
-      // Process media - pick the right processor
-      const processor = isVideo ? processVideo : processImage;
-      const { buffer, contentType } = await processor(original.buffer, params);
+      // Process image (video transforms are target-only and handled above)
+      const { buffer, contentType } = await processImage(
+        original.buffer,
+        params,
+      );
 
       // Save to cache
       await saveToCache(derivedKey, buffer, contentType);
