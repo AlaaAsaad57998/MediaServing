@@ -128,19 +128,18 @@ async function fetchCloudinaryPage(resourceType, nextCursor, maxResults) {
   });
 
   if (response.status === 429) {
-    const retryAfter = parseInt(response.headers.get("retry-after") || "60", 10);
-    console.warn(
-      `  ⚠ Cloudinary rate limit hit. Waiting ${retryAfter}s …`,
+    const retryAfter = parseInt(
+      response.headers.get("retry-after") || "60",
+      10,
     );
+    console.warn(`  ⚠ Cloudinary rate limit hit. Waiting ${retryAfter}s …`);
     await sleep(retryAfter * 1000);
     return fetchCloudinaryPage(resourceType, nextCursor, maxResults);
   }
 
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(
-      `Cloudinary API error ${response.status}: ${body}`,
-    );
+    throw new Error(`Cloudinary API error ${response.status}: ${body}`);
   }
 
   return response.json();
@@ -169,9 +168,7 @@ async function withRetry(fn, { retries = 3, baseDelay = 1000 } = {}) {
         throw err;
       }
 
-      const delay = isRateLimit
-        ? 60_000
-        : baseDelay * Math.pow(2, attempt - 1);
+      const delay = isRateLimit ? 60_000 : baseDelay * Math.pow(2, attempt - 1);
       console.warn(
         `  ⚠ Attempt ${attempt}/${retries} failed (${err.message}). Retrying in ${Math.round(delay / 1000)}s …`,
       );
@@ -337,13 +334,10 @@ async function migrateResourceType(resourceType, opts, stats) {
     // Check global limit
     if (opts.limit > 0 && stats.total >= opts.limit) break;
 
-    const remaining =
-      opts.limit > 0 ? opts.limit - stats.total : pageSize;
+    const remaining = opts.limit > 0 ? opts.limit - stats.total : pageSize;
     const fetchSize = Math.min(remaining, pageSize);
 
-    console.log(
-      `\n  Fetching up to ${fetchSize} ${resourceType} resources …`,
-    );
+    console.log(`\n  Fetching up to ${fetchSize} ${resourceType} resources …`);
 
     const page = await withRetry(() =>
       fetchCloudinaryPage(resourceType, nextCursor, fetchSize),
@@ -372,16 +366,13 @@ async function migrateResourceType(resourceType, opts, stats) {
 
         stats.total++;
         const index = stats.total;
-        const totalLabel =
-          opts.limit > 0 ? opts.limit : "?";
+        const totalLabel = opts.limit > 0 ? opts.limit : "?";
 
         const publicId = resource.public_id;
         const format = resource.format;
         const s3Key = `originals/${publicId}.${format}`;
         const secureUrl = resource.secure_url;
-        const sizeLabel = resource.bytes
-          ? formatBytes(resource.bytes)
-          : "?";
+        const sizeLabel = resource.bytes ? formatBytes(resource.bytes) : "?";
 
         // Dry-run mode
         if (opts.dryRun) {
@@ -466,10 +457,10 @@ async function main() {
   console.log("╔══════════════════════════════════════════════════╗");
   console.log("║      Cloudinary → S3 Migration                  ║");
   console.log("╚══════════════════════════════════════════════════╝");
+  console.log(`  Cloud:        ${CLOUDINARY_CLOUD_NAME}`);
   console.log(
-    `  Cloud:        ${CLOUDINARY_CLOUD_NAME}`,
+    `  Mode:         ${opts.dryRun ? "DRY RUN (no uploads)" : "LIVE"}`,
   );
-  console.log(`  Mode:         ${opts.dryRun ? "DRY RUN (no uploads)" : "LIVE"}`);
   console.log(
     `  Limit:        ${opts.limit > 0 ? opts.limit + " assets" : "unlimited"}`,
   );
@@ -488,9 +479,7 @@ async function main() {
   };
 
   const resourceTypes =
-    opts.resourceType === "all"
-      ? ["image", "video"]
-      : [opts.resourceType];
+    opts.resourceType === "all" ? ["image", "video"] : [opts.resourceType];
 
   const startTime = Date.now();
 
@@ -519,7 +508,9 @@ async function main() {
   if (stats.failures.length > 0) {
     console.log("\n  Failed items:");
     for (const f of stats.failures) {
-      console.log(`    - ${f.publicId}.${f.format} (${f.resourceType}): ${f.error}`);
+      console.log(
+        `    - ${f.publicId}.${f.format} (${f.resourceType}): ${f.error}`,
+      );
     }
   }
 
