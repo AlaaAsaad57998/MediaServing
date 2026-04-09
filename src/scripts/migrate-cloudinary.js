@@ -36,10 +36,10 @@ const CLOUDINARY_API_KEY = process.env.CLOUDINARY_API_KEY;
 const CLOUDINARY_API_SECRET = process.env.CLOUDINARY_API_SECRET;
 const CLOUDINARY_CLOUD_NAME = process.env.CLOUDINARY_API_NAME;
 
-const CHECKPOINT_FILE = path.resolve(
-  __dirname,
-  "../../.migration-cursor.json",
-);
+const CHECKPOINT_FILE =
+  process.env.NODE_ENV === "production"
+    ? "/tmp/.migration-cursor.json"
+    : path.resolve(__dirname, "../../.migration-cursor.json");
 
 const ALLOWED_IMAGE_FORMATS = new Set([
   "jpg",
