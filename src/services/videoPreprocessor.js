@@ -12,7 +12,9 @@ const SNAPSHOT_SECOND = 1;
 const PREVIEW_DURATION = 10;
 
 const VIDEO_TRANSFORM_PRESETS = {
-  full: { name: "full", transform: "w_1280,h_630,f_webm,vc_auto,q_80,c_fit" },
+  // H.264/MP4: ~4× less RAM than VP9, faster encode, maximum device support.
+  // VP9/WebM was causing SIGKILL (OOM) inside the 512 MB container limit.
+  full: { name: "full", transform: "w_1280,h_630,f_mp4,vc_h264,q_80,c_fit" },
   preview: {
     name: "preview",
     transform: "w_400,h_600,f_webm,vc_auto,q_70,c_fill",

@@ -384,9 +384,18 @@ async function processVideo(inputBuffer, params) {
     });
     const stderr = [];
     proc.stderr.on("data", (d) => stderr.push(d));
-    proc.on("close", (code) => {
-      if (code !== 0) {
+    proc.on("close", (code, signal) => {
+      if (code !== 0 || code === null) {
         const msg = Buffer.concat(stderr).toString().slice(0, 500);
+        if (signal) {
+          // Killed by OS — most likely SIGKILL from Docker OOM.
+          return reject(
+            new Error(
+              `ffmpeg killed by signal ${signal} (likely out-of-memory). ` +
+                `Consider increasing container memory or reducing concurrency. stderr: ${msg}`,
+            ),
+          );
+        }
         return reject(new Error(`ffmpeg exited ${code}: ${msg}`));
       }
       resolve();

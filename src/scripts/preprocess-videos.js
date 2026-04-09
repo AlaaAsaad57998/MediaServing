@@ -58,7 +58,9 @@ function isVideoKey(key) {
 // ── CLI args ─────────────────────────────────────────────────────────────────
 function parseArgs(argv) {
   const args = argv.slice(2);
-  const opts = { dryRun: false, concurrency: 2, prefix: "originals/" };
+  // Default concurrency is 1: video transcoding is CPU/RAM-intensive.
+  // Raise to 2 only if your container has ≥1 GB of available memory.
+  const opts = { dryRun: false, concurrency: 1, prefix: "originals/" };
 
   for (let i = 0; i < args.length; i++) {
     switch (args[i]) {
