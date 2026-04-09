@@ -274,6 +274,14 @@ async function processVideo(inputBuffer, params) {
 
   const filters = buildFilterChain(params, probeInfo, padColor);
 
+  // H.264 / H.265 with yuv420p require even pixel dimensions due to 4:2:0
+  // chroma subsampling. force_original_aspect_ratio=decrease (used by c_fit)
+  // can produce odd numbers (e.g. 354×629). Append a normalisation step that
+  // is a no-op for even dimensions and rounds odd ones down by 1 pixel.
+  if (vcodec === "libx264" || vcodec === "libx265") {
+    filters.push("scale=trunc(iw/2)*2:trunc(ih/2)*2");
+  }
+
   // ── Build ffmpeg args ────────────────────────────────────────────────
 
   const args = ["-y", "-hide_banner", "-loglevel", "error"];
