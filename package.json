@@ -8,7 +8,9 @@
     "dev": "cross-env NODE_ENV=development node --watch src/index.js",
     "migrate": "node src/scripts/migrate-cloudinary.js",
     "migrate:dry": "node src/scripts/migrate-cloudinary.js --dry-run",
-    "migrate:full": "node src/scripts/migrate-cloudinary.js --limit 0"
+    "migrate:full": "node src/scripts/migrate-cloudinary.js --limit 0",
+    "preprocess-videos": "node src/scripts/preprocess-videos.js",
+    "preprocess-videos:dry": "node src/scripts/preprocess-videos.js --dry-run"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.800.0",

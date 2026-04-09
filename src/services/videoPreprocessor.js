@@ -133,5 +133,6 @@ module.exports = {
   snapshotCacheKey,
   previewParams,
   fullParams,
+  SNAPSHOT_SECOND,
   VIDEO_TRANSFORM_PRESETS,
 };

@@ -17,9 +17,14 @@ const {
 const { acquireLock, releaseLock } = require("../services/lockService");
 const { processImage } = require("../processors/imageProcessor");
 const {
+  processVideo,
+  extractSnapshot,
+} = require("../processors/videoProcessor");
+const {
   snapshotCacheKey,
   previewParams,
   fullParams,
+  SNAPSHOT_SECOND,
 } = require("../services/videoPreprocessor");
 
 function setMediaCacheHeaders(reply) {
@@ -232,25 +237,6 @@ async function transformRoutes(fastify) {
   //  VIDEO — ignore URL transforms, serve prebuilt variants via ?target=
   // ──────────────────────────────────────────────────────────────────────
 
-  async function serveVideoVariantFromCache(derivedKey, variant, reply) {
-    const cached = await checkCache(derivedKey);
-    if (cached) {
-      const { buffer, contentType } = await getFromCache(derivedKey);
-      reply.header("Content-Type", contentType);
-      setMediaCacheHeaders(reply);
-      reply.header("X-Video-Target", variant);
-      reply.header("X-Cache", "HIT");
-      return reply.send(buffer);
-    }
-
-    reply.header("X-Video-Target", variant);
-    reply.header("X-Cache", "MISS");
-    return reply.code(503).send({
-      error:
-        "Video variant not ready yet. Only prebuilt variants are served; retry shortly after upload.",
-    });
-  }
-
   async function handleVideo(request, reply, filePath) {
     const originalKey = `originals/${filePath}`;
     const target = resolveVideoTarget(request);
@@ -261,21 +247,85 @@ async function transformRoutes(fastify) {
       });
     }
 
+    // Resolve the derived cache key and variant name from the target
+    let derivedKey;
+    let variantName;
+    let variantParams;
+
     if (target === "snapshot") {
-      const derivedKey = snapshotCacheKey(originalKey);
-      return serveVideoVariantFromCache(derivedKey, "snapshot", reply);
+      derivedKey = snapshotCacheKey(originalKey);
+      variantName = "snapshot";
+    } else if (target === "preview") {
+      variantParams = previewParams();
+      derivedKey = generateDerivedKey(originalKey, variantParams);
+      variantName = "preview";
+    } else {
+      variantParams = fullParams();
+      derivedKey = generateDerivedKey(originalKey, variantParams);
+      variantName = "full";
     }
 
-    if (target === "preview") {
-      const params = previewParams();
-      const derivedKey = generateDerivedKey(originalKey, params);
-      return serveVideoVariantFromCache(derivedKey, "preview", reply);
+    // ── 1. Cache hit (fast path) ────────────────────────────────────────
+    if (await checkCache(derivedKey)) {
+      const { buffer, contentType } = await getFromCache(derivedKey);
+      reply.header("Content-Type", contentType);
+      setMediaCacheHeaders(reply);
+      reply.header("X-Video-Target", variantName);
+      reply.header("X-Cache", "HIT");
+      return reply.send(buffer);
     }
 
-    // Default: full quality prebuilt variant
-    const params = fullParams();
-    const derivedKey = generateDerivedKey(originalKey, params);
-    return serveVideoVariantFromCache(derivedKey, "full", reply);
+    // ── 2. Acquire lock — prevent duplicate processing ──────────────────
+    const locked = await acquireLock(derivedKey);
+    if (!locked) return serveFromCacheOrWait(derivedKey, reply);
+
+    try {
+      // Double-check after acquiring lock (another worker may have just finished)
+      if (await checkCache(derivedKey)) {
+        const { buffer, contentType } = await getFromCache(derivedKey);
+        reply.header("Content-Type", contentType);
+        setMediaCacheHeaders(reply);
+        reply.header("X-Video-Target", variantName);
+        reply.header("X-Cache", "HIT");
+        return reply.send(buffer);
+      }
+
+      // ── 3. Fetch original from S3 ─────────────────────────────────────
+      let originalBuffer;
+      try {
+        const original = await getObjectBuffer(originalKey);
+        originalBuffer = original.buffer;
+      } catch (err) {
+        if (err.name === "NoSuchKey" || err.$metadata?.httpStatusCode === 404) {
+          return reply.code(404).send({ error: "Original file not found" });
+        }
+        throw err;
+      }
+
+      // ── 4. Process the requested variant ─────────────────────────────
+      let buffer, contentType;
+      if (variantName === "snapshot") {
+        ({ buffer, contentType } = await extractSnapshot(
+          originalBuffer,
+          SNAPSHOT_SECOND,
+        ));
+      } else {
+        ({ buffer, contentType } = await processVideo(
+          originalBuffer,
+          variantParams,
+        ));
+      }
+
+      await saveToCache(derivedKey, buffer, contentType);
+
+      reply.header("Content-Type", contentType);
+      setMediaCacheHeaders(reply);
+      reply.header("X-Video-Target", variantName);
+      reply.header("X-Cache", "MISS");
+      return reply.send(buffer);
+    } finally {
+      await releaseLock(derivedKey);
+    }
   }
 
   // ──────────────────────────────────────────────────────────────────────
