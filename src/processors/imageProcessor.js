@@ -72,8 +72,12 @@ async function processImage(inputBuffer, params) {
     pipeline = pipeline.toFormat(format, quality ? { quality } : {});
   }
 
-  const buffer = await pipeline.toBuffer();
-  const outputFormat = format || (params.fl_lossy ? "png" : null);
+  const { data: buffer, info } = await pipeline.toBuffer({
+    resolveWithObject: true,
+  });
+  // Use the explicit output format when set, otherwise ask Sharp what it
+  // actually produced (preserves original format when no f_ param given).
+  const outputFormat = format || (params.fl_lossy ? "png" : info.format);
   const contentType = outputFormat
     ? mime.lookup(outputFormat) || "application/octet-stream"
     : "application/octet-stream";

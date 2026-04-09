@@ -5,7 +5,10 @@
   "main": "src/index.js",
   "scripts": {
     "start": "cross-env NODE_ENV=production node src/index.js",
-    "dev": "cross-env NODE_ENV=development node --watch src/index.js"
+    "dev": "cross-env NODE_ENV=development node --watch src/index.js",
+    "migrate": "node src/scripts/migrate-cloudinary.js",
+    "migrate:dry": "node src/scripts/migrate-cloudinary.js --dry-run",
+    "migrate:full": "node src/scripts/migrate-cloudinary.js --limit 0"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.800.0",

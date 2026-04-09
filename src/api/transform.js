@@ -1,8 +1,11 @@
+const path = require("path");
 const {
-  parseParams,
+  parseChainedTransformations,
   resolveQAuto,
   ValidationError,
   isVideoPath,
+  isTransformationSegment,
+  VALID_IMAGE_FORMATS,
 } = require("../utils/paramParser");
 const { generateDerivedKey } = require("../utils/hashGenerator");
 const { getObjectBuffer } = require("../storage/s3Client");
@@ -27,14 +30,43 @@ function setMediaCacheHeaders(reply) {
   );
 }
 
+/**
+ * Parse the wildcard path after `upload/` into Cloudinary-style chained
+ * transformation segments and a file path (public_id).
+ *
+ * URL pattern: /<resource_type>/upload/<t1>/<t2>/.../<public_id>
+ *
+ * A segment is treated as a transformation group when every comma-separated
+ * token matches a known transformation key (w_300, h_200, fl_lossy, etc.).
+ * The first non-transformation segment (and everything after it) forms the
+ * file path.
+ */
+function parsePath(wildcard) {
+  if (!wildcard) return { transformationSegments: [], filePath: "" };
+
+  const segments = wildcard.split("/").filter(Boolean);
+  let filePathStart = 0;
+
+  for (let i = 0; i < segments.length; i++) {
+    if (isTransformationSegment(segments[i])) {
+      filePathStart = i + 1;
+    } else {
+      break;
+    }
+  }
+
+  return {
+    transformationSegments: segments.slice(0, filePathStart),
+    filePath: segments.slice(filePathStart).join("/"),
+  };
+}
+
 function resolveVideoTarget(request) {
-  // Primary source: parsed query object.
   let rawTarget = request?.query?.target;
   if (Array.isArray(rawTarget)) {
     rawTarget = rawTarget[0];
   }
 
-  // Fallback: parse query directly from raw URL if needed.
   if ((rawTarget == null || rawTarget === "") && request?.raw?.url) {
     const qIndex = request.raw.url.indexOf("?");
     if (qIndex !== -1) {
@@ -49,27 +81,157 @@ function resolveVideoTarget(request) {
     .toLowerCase();
 }
 
-async function sendOriginalFile(filePath, reply) {
-  const originalKey = `originals/${filePath}`;
-
-  try {
-    const original = await getObjectBuffer(originalKey);
-    reply.header(
-      "Content-Type",
-      original.contentType || "application/octet-stream",
-    );
+/** Wait for another worker to finish, then serve from cache or 503. */
+async function serveFromCacheOrWait(derivedKey, reply) {
+  await new Promise((resolve) => setTimeout(resolve, 2000));
+  const hit = await checkCache(derivedKey);
+  if (hit) {
+    const { buffer, contentType } = await getFromCache(derivedKey);
+    reply.header("Content-Type", contentType);
     setMediaCacheHeaders(reply);
-    reply.header("X-Cache", "BYPASS");
-    return reply.send(original.buffer);
-  } catch (err) {
-    if (err.name === "NoSuchKey" || err.$metadata?.httpStatusCode === 404) {
-      return reply.code(404).send({ error: "Original file not found" });
-    }
-    throw err;
+    reply.header("X-Cache", "HIT");
+    return reply.send(buffer);
   }
+  return reply
+    .code(503)
+    .send({ error: "Processing in progress, try again shortly" });
 }
 
 async function transformRoutes(fastify) {
+  const routeConfig = {
+    config: {
+      rateLimit: {
+        max: Number.parseInt(process.env.TRANSFORM_RATE_LIMIT_MAX || "120", 10),
+        timeWindow: Number.parseInt(
+          process.env.TRANSFORM_RATE_LIMIT_WINDOW_MS || "60000",
+          10,
+        ),
+      },
+    },
+  };
+
+  // ──────────────────────────────────────────────────────────────────────
+  //  Unified request handler
+  // ──────────────────────────────────────────────────────────────────────
+
+  async function handleRequest(request, reply) {
+    let resourceType = request.params.resourceType;
+    const wildcard = request.params["*"];
+
+    if (!wildcard) {
+      return reply.code(400).send({ error: "File path is required" });
+    }
+
+    const { transformationSegments, filePath } = parsePath(wildcard);
+
+    if (!filePath) {
+      return reply.code(400).send({ error: "File path is required" });
+    }
+
+    // "media" is a legacy alias — auto-detect from file extension
+    if (!resourceType || resourceType === "media") {
+      resourceType = isVideoPath(filePath) ? "video" : "image";
+    }
+
+    if (resourceType !== "image" && resourceType !== "video") {
+      return reply
+        .code(400)
+        .send({ error: "resourceType must be image or video" });
+    }
+
+    // Parse transformations (to validate them) but usage differs per type
+    let params;
+    try {
+      params =
+        transformationSegments.length > 0
+          ? parseChainedTransformations(transformationSegments)
+          : {};
+    } catch (err) {
+      if (err instanceof ValidationError) {
+        return reply.code(400).send({ error: err.message });
+      }
+      throw err;
+    }
+
+    const isVideo =
+      resourceType === "video" || (!resourceType && isVideoPath(filePath));
+
+    if (isVideo) {
+      // VIDEO: ignore all URL transform params, only use ?target= query param
+      return handleVideo(request, reply, filePath);
+    }
+    return handleImage(reply, filePath, params);
+  }
+
+  // ──────────────────────────────────────────────────────────────────────
+  //  IMAGE — accept Cloudinary params but always force f=webp
+  // ──────────────────────────────────────────────────────────────────────
+
+  async function handleImage(reply, filePath, params) {
+    // Always output webp regardless of f_ param
+    params.f = "webp";
+
+    // Resolve q_auto to a concrete integer for deterministic cache keys
+    if (typeof params.q === "string" && params.q.startsWith("auto")) {
+      params.q = resolveQAuto(params.q);
+    }
+
+    if (Object.keys(params).length === 0) {
+      return sendOriginal(filePath, reply);
+    }
+
+    const originalKey = `originals/${filePath}`;
+    const derivedKey = generateDerivedKey(originalKey, params);
+
+    if (await checkCache(derivedKey)) {
+      const { buffer, contentType } = await getFromCache(derivedKey);
+      reply.header("Content-Type", contentType);
+      setMediaCacheHeaders(reply);
+      reply.header("X-Cache", "HIT");
+      return reply.send(buffer);
+    }
+
+    const locked = await acquireLock(derivedKey);
+    if (!locked) return serveFromCacheOrWait(derivedKey, reply);
+
+    try {
+      if (await checkCache(derivedKey)) {
+        const { buffer, contentType } = await getFromCache(derivedKey);
+        reply.header("Content-Type", contentType);
+        setMediaCacheHeaders(reply);
+        reply.header("X-Cache", "HIT");
+        return reply.send(buffer);
+      }
+
+      let original;
+      try {
+        original = await getObjectBuffer(originalKey);
+      } catch (err) {
+        if (err.name === "NoSuchKey" || err.$metadata?.httpStatusCode === 404) {
+          return reply.code(404).send({ error: "Original file not found" });
+        }
+        throw err;
+      }
+
+      const { buffer, contentType } = await processImage(
+        original.buffer,
+        params,
+      );
+      await saveToCache(derivedKey, buffer, contentType);
+
+      reply.header("Content-Type", contentType);
+      setMediaCacheHeaders(reply);
+      reply.header("X-Cache", "MISS");
+      return reply.send(buffer);
+    } finally {
+      await releaseLock(derivedKey);
+    }
+  }
+
+  // ──────────────────────────────────────────────────────────────────────
+  //  VIDEO — ignore URL transforms, serve prebuilt variants via ?target=
+  // ──────────────────────────────────────────────────────────────────────
+
   async function serveVideoVariantFromCache(derivedKey, variant, reply) {
     const cached = await checkCache(derivedKey);
     if (cached) {
@@ -89,8 +251,15 @@ async function transformRoutes(fastify) {
     });
   }
 
-  async function handleVideoTarget(request, reply, filePath, target) {
+  async function handleVideo(request, reply, filePath) {
     const originalKey = `originals/${filePath}`;
+    const target = resolveVideoTarget(request);
+    const validTargets = ["snapshot", "preview", ""];
+    if (!validTargets.includes(target)) {
+      return reply.code(400).send({
+        error: "Invalid target. Use snapshot, preview, or omit for full video",
+      });
+    }
 
     if (target === "snapshot") {
       const derivedKey = snapshotCacheKey(originalKey);
@@ -103,209 +272,38 @@ async function transformRoutes(fastify) {
       return serveVideoVariantFromCache(derivedKey, "preview", reply);
     }
 
-    // Default: full quality
+    // Default: full quality prebuilt variant
     const params = fullParams();
     const derivedKey = generateDerivedKey(originalKey, params);
     return serveVideoVariantFromCache(derivedKey, "full", reply);
   }
 
-  async function handleOriginal(request, reply) {
-    const filePath = request.params["*"];
-    const explicitResourceType = request.params.resourceType;
+  // ──────────────────────────────────────────────────────────────────────
+  //  Serve original (no transformations)
+  // ──────────────────────────────────────────────────────────────────────
 
-    if (!filePath) {
-      return reply.code(400).send({ error: "File path is required" });
-    }
-
-    if (
-      explicitResourceType &&
-      explicitResourceType !== "image" &&
-      explicitResourceType !== "video"
-    ) {
-      return reply
-        .code(400)
-        .send({ error: "resourceType must be image or video" });
-    }
-
-    // Video target shortcuts: ?target=snapshot|preview or default full
-    const isVideo =
-      explicitResourceType === "video" ||
-      (explicitResourceType !== "image" && isVideoPath(filePath));
-
-    if (isVideo) {
-      const target = resolveVideoTarget(request);
-      const validTargets = ["snapshot", "preview", ""];
-      if (!validTargets.includes(target)) {
-        return reply.code(400).send({
-          error:
-            "Invalid target. Use snapshot, preview, or omit for full video",
-        });
-      }
-      return handleVideoTarget(request, reply, filePath, target);
-    }
-
-    return sendOriginalFile(filePath, reply);
-  }
-
-  async function handleTransform(request, reply) {
-    const filePath = request.params["*"];
-    const explicitResourceType = request.params.resourceType;
-
-    if (!filePath) {
-      return reply.code(400).send({ error: "File path is required" });
-    }
-
-    if (
-      explicitResourceType &&
-      explicitResourceType !== "image" &&
-      explicitResourceType !== "video"
-    ) {
-      return reply
-        .code(400)
-        .send({ error: "resourceType must be image or video" });
-    }
-
-    // For video URLs, ignore all transformation path params and only use
-    // the target query param (?target=snapshot|preview|<empty>).
-    const isVideoRequest =
-      explicitResourceType === "video" ||
-      (explicitResourceType !== "image" && isVideoPath(filePath));
-
-    if (isVideoRequest) {
-      const target = resolveVideoTarget(request);
-      const validTargets = ["snapshot", "preview", ""];
-      if (!validTargets.includes(target)) {
-        return reply.code(400).send({
-          error:
-            "Invalid target. Use snapshot, preview, or omit for full video",
-        });
-      }
-      return handleVideoTarget(request, reply, filePath, target);
-    }
-
-    const { transformations } = request.params;
-
-    // Parse transformation params
-    let params;
+  async function sendOriginal(filePath, reply) {
+    const originalKey = `originals/${filePath}`;
     try {
-      params = parseParams(transformations);
+      const { buffer, contentType } = await getObjectBuffer(originalKey);
+      reply.header("Content-Type", contentType || "application/octet-stream");
+      setMediaCacheHeaders(reply);
+      reply.header("X-Cache", "BYPASS");
+      return reply.send(buffer);
     } catch (err) {
-      if (err instanceof ValidationError) {
-        return reply.code(400).send({ error: err.message });
+      if (err.name === "NoSuchKey" || err.$metadata?.httpStatusCode === 404) {
+        return reply.code(404).send({ error: "Original file not found" });
       }
       throw err;
     }
-
-    // --- Resolve values BEFORE cache-key generation ---
-    // Only images reach this code path. Force image output format to WebP,
-    // regardless of what the client sends in f_.
-    params.f = "webp";
-
-    // q_auto[:level]: resolve to a concrete integer so the cache key is
-    // deterministic (e.g. "auto:good" -> 75).
-    if (typeof params.q === "string" && params.q.startsWith("auto")) {
-      params.q = resolveQAuto(params.q);
-    }
-    // --------------------------------------------------------
-
-    if (Object.keys(params).length === 0) {
-      return sendOriginalFile(filePath, reply);
-    }
-
-    const originalKey = `originals/${filePath}`;
-    const derivedKey = generateDerivedKey(originalKey, params);
-
-    // Check if derived version already exists
-    const cached = await checkCache(derivedKey);
-    if (cached) {
-      const { buffer, contentType } = await getFromCache(derivedKey);
-      reply.header("Content-Type", contentType);
-      setMediaCacheHeaders(reply);
-      reply.header("X-Cache", "HIT");
-      return reply.send(buffer);
-    }
-
-    // Acquire lock to prevent duplicate processing
-    const lockAcquired = await acquireLock(derivedKey);
-    if (!lockAcquired) {
-      // Another process is working on it - wait and serve from cache
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-      const recheck = await checkCache(derivedKey);
-      if (recheck) {
-        const { buffer, contentType } = await getFromCache(derivedKey);
-        reply.header("Content-Type", contentType);
-        setMediaCacheHeaders(reply);
-        reply.header("X-Cache", "HIT");
-        return reply.send(buffer);
-      }
-      return reply
-        .code(503)
-        .send({ error: "Processing in progress, try again shortly" });
-    }
-
-    try {
-      // Double-check cache after acquiring lock
-      const rechecked = await checkCache(derivedKey);
-      if (rechecked) {
-        const { buffer, contentType } = await getFromCache(derivedKey);
-        reply.header("Content-Type", contentType);
-        setMediaCacheHeaders(reply);
-        reply.header("X-Cache", "HIT");
-        return reply.send(buffer);
-      }
-
-      // Fetch original
-      let original;
-      try {
-        original = await getObjectBuffer(originalKey);
-      } catch (err) {
-        if (err.name === "NoSuchKey" || err.$metadata?.httpStatusCode === 404) {
-          return reply.code(404).send({ error: "Original file not found" });
-        }
-        throw err;
-      }
-
-      // Process image (video transforms are target-only and handled above)
-      const { buffer, contentType } = await processImage(
-        original.buffer,
-        params,
-      );
-
-      // Save to cache
-      await saveToCache(derivedKey, buffer, contentType);
-
-      reply.header("Content-Type", contentType);
-      setMediaCacheHeaders(reply);
-      reply.header("X-Cache", "MISS");
-      return reply.send(buffer);
-    } finally {
-      await releaseLock(derivedKey);
-    }
   }
 
-  const routeConfig = {
-    config: {
-      rateLimit: {
-        max: Number.parseInt(process.env.TRANSFORM_RATE_LIMIT_MAX || "120", 10),
-        timeWindow: Number.parseInt(
-          process.env.TRANSFORM_RATE_LIMIT_WINDOW_MS || "60000",
-          10,
-        ),
-      },
-    },
-  };
+  // ── Route registration ─────────────────────────────────────────────────
+  // Accepts Cloudinary-style URLs; transforms parsed but:
+  //   - Images: all params used EXCEPT format (always webp)
+  //   - Videos: all URL params ignored, only ?target= matters
 
-  fastify.get("/media/upload/*", routeConfig, handleOriginal);
-
-  fastify.get("/:resourceType/upload/*", routeConfig, handleOriginal);
-
-  fastify.get("/media/upload/:transformations/*", routeConfig, handleTransform);
-
-  fastify.get(
-    "/:resourceType/upload/:transformations/*",
-    routeConfig,
-    handleTransform,
-  );
+  fastify.get("/:resourceType/upload/*", routeConfig, handleRequest);
 }
 
 module.exports = transformRoutes;

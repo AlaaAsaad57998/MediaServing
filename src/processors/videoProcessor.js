@@ -423,4 +423,26 @@ async function extractSnapshot(inputBuffer, timeSec = 1) {
   }
 }
 
-module.exports = { processVideo, extractSnapshot, probe };
+/**
+ * Extract a raw PNG frame from a video at the given timestamp.
+ * The caller can then pipe the result through processImage for format
+ * conversion, resizing, etc.
+ */
+async function extractRawFrame(inputBuffer, timeSec = 0) {
+  const inPath = tmpPath("src");
+  await fs.writeFile(inPath, inputBuffer);
+
+  try {
+    const probeInfo = await probe(inPath);
+    const duration = parseFloat(probeInfo?.format?.duration || "0");
+    const seekTo = Math.min(timeSec, Math.max(duration - 0.1, 0));
+    const frameBuf = await extractFrame(inPath, seekTo);
+    await cleanup(inPath);
+    return frameBuf;
+  } catch (err) {
+    await cleanup(inPath);
+    throw new Error(`Frame extraction failed: ${err.message}`);
+  }
+}
+
+module.exports = { processVideo, extractSnapshot, extractRawFrame, probe };

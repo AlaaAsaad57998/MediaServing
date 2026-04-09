@@ -20,6 +20,17 @@ const FIT_ALIASES = {
 };
 const VALID_FLAGS = new Set(["lossy"]);
 const VALID_VIDEO_CODECS = new Set(["auto", "h264", "h265", "hevc", "vp9"]);
+const KNOWN_TRANSFORM_KEYS = new Set([
+  "w",
+  "h",
+  "q",
+  "f",
+  "c",
+  "b",
+  "vc",
+  "so",
+  "eo",
+]);
 
 // Quality presets for q_auto — mirrors Cloudinary's naming
 const Q_AUTO_PRESETS = { eco: 45, low: 55, good: 75, best: 85 };
@@ -236,14 +247,50 @@ function hasVideoParams(params) {
   return params.vc != null || params.so != null || params.eo != null;
 }
 
+/**
+ * Returns true when a URL path segment looks like a Cloudinary transformation
+ * group, e.g. "w_300,h_200,c_fill" or "fl_lossy".
+ */
+function isTransformationSegment(segment) {
+  if (!segment || segment.trim() === "") return false;
+  const parts = segment.split(",");
+  if (parts.length === 0) return false;
+  return parts.every((part) => {
+    const trimmed = part.trim();
+    if (!trimmed) return false;
+    if (trimmed.startsWith("fl_")) {
+      return VALID_FLAGS.has(trimmed.slice(3));
+    }
+    const sepIndex = trimmed.indexOf("_");
+    if (sepIndex === -1) return false;
+    const key = trimmed.slice(0, sepIndex);
+    return KNOWN_TRANSFORM_KEYS.has(key);
+  });
+}
+
+/**
+ * Parse multiple Cloudinary chained transformation groups and merge into one
+ * params object.  Later groups override earlier ones for the same key.
+ */
+function parseChainedTransformations(segments) {
+  const merged = {};
+  for (const segment of segments) {
+    const params = parseParams(segment);
+    Object.assign(merged, params);
+  }
+  return merged;
+}
+
 module.exports = {
   parseParams,
+  parseChainedTransformations,
   resolveQAuto,
   Q_AUTO_PRESETS,
   ValidationError,
   isVideoFile,
   isVideoPath,
   hasVideoParams,
+  isTransformationSegment,
   VALID_IMAGE_FORMATS,
   VALID_VIDEO_FORMATS,
 };
