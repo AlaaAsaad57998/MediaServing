@@ -226,6 +226,13 @@ function buildMultipart(fileStream, filename, mimeType, folder) {
 
 function uploadStream(bodyStream, boundary, opts) {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      fn(value);
+    };
+
     const uploadPath = "/upload" + (opts.story ? "?story=true" : "");
     const parsed = new URL(opts.apiUrl + uploadPath);
     const transport = parsed.protocol === "https:" ? https : http;
@@ -246,6 +253,12 @@ function uploadStream(bodyStream, boundary, opts) {
 
     const req = transport.request(reqOpts, (res) => {
       const chunks = [];
+      res.on("aborted", () => {
+        finish(
+          reject,
+          new Error("Upload response was aborted before completion"),
+        );
+      });
       res.on("data", (d) => chunks.push(d));
       res.on("end", () => {
         const body = Buffer.concat(chunks).toString("utf8");
@@ -253,27 +266,42 @@ function uploadStream(bodyStream, boundary, opts) {
         try {
           json = JSON.parse(body);
         } catch {
-          return reject(
+          return finish(
+            reject,
             new Error(
               `Non-JSON response (HTTP ${res.statusCode}): ${body.slice(0, 300)}`,
             ),
           );
         }
         if (res.statusCode >= 400) {
-          return reject(
+          return finish(
+            reject,
             new Error(
               `Upload failed (HTTP ${res.statusCode}): ${json.error || body}`,
             ),
           );
         }
-        resolve({ statusCode: res.statusCode, data: json });
+        finish(resolve, { statusCode: res.statusCode, data: json });
       });
     });
 
-    req.on("error", reject);
+    req.on("error", (err) => finish(reject, err));
     req.on("timeout", () => {
       req.destroy();
-      reject(new Error("Upload request timed out (>10 min)"));
+      finish(reject, new Error("Upload request timed out (>10 min)"));
+    });
+    req.on("close", () => {
+      if (!settled) {
+        finish(
+          reject,
+          new Error("Upload connection closed before a response was received"),
+        );
+      }
+    });
+
+    bodyStream.on("error", (err) => {
+      req.destroy(err);
+      finish(reject, err);
     });
 
     bodyStream.pipe(req);
