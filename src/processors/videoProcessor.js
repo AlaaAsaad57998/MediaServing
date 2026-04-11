@@ -99,6 +99,54 @@ function extractFrame(inputPath, timeSec) {
   });
 }
 
+function isLikelyPlaylist(name) {
+  return name.toLowerCase().endsWith(".m3u8");
+}
+
+function isLikelySegment(name) {
+  const lower = name.toLowerCase();
+  return (
+    lower.endsWith(".ts") || lower.endsWith(".m4s") || lower.endsWith(".mp4")
+  );
+}
+
+function sanitizeAssetName(assetName) {
+  const name = String(assetName || "").trim();
+  if (!name) return "master.m3u8";
+  if (name.includes("..") || name.includes("/") || name.includes("\\")) {
+    throw new Error("Invalid story asset name");
+  }
+  return name;
+}
+
+function storyAssetContentType(assetName) {
+  const name = sanitizeAssetName(assetName);
+  if (isLikelyPlaylist(name)) return "application/vnd.apple.mpegurl";
+  if (name.toLowerCase().endsWith(".ts")) return "video/mp2t";
+  return "application/octet-stream";
+}
+
+function buildStoryMasterPlaylist(baseQueryPath, renditions) {
+  const lines = ["#EXTM3U", "#EXT-X-VERSION:3"];
+  for (const r of renditions) {
+    lines.push(
+      `#EXT-X-STREAM-INF:BANDWIDTH=${r.bandwidth},RESOLUTION=${r.w}x${r.h},CODECS=\"avc1.4d401f,mp4a.40.2\"`,
+      `${baseQueryPath}?target=story&asset=${encodeURIComponent(`${r.name}.m3u8`)}`,
+    );
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function rewritePlaylistUris(playlistText, baseQueryPath) {
+  const lines = playlistText.split(/\r?\n/);
+  const rewritten = lines.map((line) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) return line;
+    return `${baseQueryPath}?target=story&asset=${encodeURIComponent(trimmed)}`;
+  });
+  return `${rewritten.join("\n")}\n`;
+}
+
 // ── codec / format mapping ─────────────────────────────────────────────────
 
 function resolveCodecAndFormat(params, probeInfo) {
@@ -462,4 +510,193 @@ async function extractRawFrame(inputBuffer, timeSec = 0) {
   }
 }
 
-module.exports = { processVideo, extractSnapshot, extractRawFrame, probe };
+async function transcodeStoryVariant(inPath, outDir, rendition) {
+  const playlistName = `${rendition.name}.m3u8`;
+  const segmentPattern = path.join(outDir, `${rendition.name}_%03d.ts`);
+  const outPlaylistPath = path.join(outDir, playlistName);
+
+  const scaleFilter =
+    `scale=${rendition.w}:${rendition.h}:force_original_aspect_ratio=decrease,` +
+    `pad=${rendition.w}:${rendition.h}:(ow-iw)/2:(oh-ih)/2:color=black,` +
+    "scale=trunc(iw/2)*2:trunc(ih/2)*2";
+
+  const args = [
+    "-y",
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-i",
+    inPath,
+    "-vf",
+    scaleFilter,
+    "-c:v",
+    "libx264",
+    "-preset",
+    "veryfast",
+    "-profile:v",
+    "main",
+    "-level",
+    "4.0",
+    "-pix_fmt",
+    "yuv420p",
+    "-b:v",
+    rendition.videoBitrate,
+    "-maxrate",
+    rendition.maxRate,
+    "-bufsize",
+    rendition.bufSize,
+    "-g",
+    "48",
+    "-keyint_min",
+    "48",
+    "-sc_threshold",
+    "0",
+    "-c:a",
+    "aac",
+    "-b:a",
+    rendition.audioBitrate,
+    "-ar",
+    "48000",
+    "-ac",
+    "2",
+    "-hls_time",
+    "2",
+    "-hls_playlist_type",
+    "vod",
+    "-hls_flags",
+    "independent_segments",
+    "-hls_segment_filename",
+    segmentPattern,
+    outPlaylistPath,
+  ];
+
+  await new Promise((resolve, reject) => {
+    const proc = spawn(FFMPEG_BIN, args, {
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    const stderr = [];
+    proc.stderr.on("data", (d) => stderr.push(d));
+    proc.on("close", (code) => {
+      if (code !== 0) {
+        const msg = Buffer.concat(stderr).toString().slice(0, 700);
+        return reject(
+          new Error(`Story rendition ${rendition.name} failed: ${msg}`),
+        );
+      }
+      resolve();
+    });
+    proc.on("error", reject);
+  });
+}
+
+/**
+ * Generate story-focused HLS assets with multiple renditions and rewrite
+ * playlists to point back to this API route for delivery.
+ */
+async function processStoryHls(inputBuffer, baseQueryPath) {
+  const inPath = tmpPath("src");
+  const outDir = path.join(
+    os.tmpdir(),
+    `ms_story_${crypto.randomBytes(8).toString("hex")}`,
+  );
+  await fs.mkdir(outDir, { recursive: true });
+  await fs.writeFile(inPath, inputBuffer);
+
+  const renditions = [
+    {
+      name: "r360",
+      w: 360,
+      h: 640,
+      videoBitrate: "500k",
+      maxRate: "650k",
+      bufSize: "1000k",
+      audioBitrate: "64k",
+      bandwidth: 650000,
+    },
+    {
+      name: "r540",
+      w: 540,
+      h: 960,
+      videoBitrate: "900k",
+      maxRate: "1100k",
+      bufSize: "1800k",
+      audioBitrate: "96k",
+      bandwidth: 1200000,
+    },
+    {
+      name: "r720",
+      w: 720,
+      h: 1280,
+      videoBitrate: "1800k",
+      maxRate: "2100k",
+      bufSize: "3200k",
+      audioBitrate: "128k",
+      bandwidth: 2300000,
+    },
+  ];
+
+  try {
+    for (const rendition of renditions) {
+      await transcodeStoryVariant(inPath, outDir, rendition);
+    }
+
+    const files = await fs.readdir(outDir);
+    const assets = [];
+
+    for (const fileName of files) {
+      if (!isLikelyPlaylist(fileName) && !isLikelySegment(fileName)) {
+        continue;
+      }
+      const fullPath = path.join(outDir, fileName);
+      let buffer = await fs.readFile(fullPath);
+      if (isLikelyPlaylist(fileName)) {
+        const originalText = buffer.toString("utf8");
+        const rewritten = rewritePlaylistUris(originalText, baseQueryPath);
+        buffer = Buffer.from(rewritten, "utf8");
+      }
+      assets.push({
+        name: fileName,
+        buffer,
+        contentType: storyAssetContentType(fileName),
+      });
+    }
+
+    const masterText = buildStoryMasterPlaylist(baseQueryPath, renditions);
+    assets.push({
+      name: "master.m3u8",
+      buffer: Buffer.from(masterText, "utf8"),
+      contentType: storyAssetContentType("master.m3u8"),
+    });
+
+    return { assets };
+  } finally {
+    await cleanup(inPath);
+    try {
+      await fs.rm(outDir, { recursive: true, force: true });
+    } catch {
+      /* best-effort */
+    }
+  }
+}
+
+async function probeDuration(inputBuffer) {
+  const inPath = tmpPath("src");
+  await fs.writeFile(inPath, inputBuffer);
+  try {
+    const info = await probe(inPath);
+    return parseFloat(info?.format?.duration || "0") || 0;
+  } finally {
+    await cleanup(inPath);
+  }
+}
+
+module.exports = {
+  processVideo,
+  processStoryHls,
+  probeDuration,
+  extractSnapshot,
+  extractRawFrame,
+  probe,
+  sanitizeAssetName,
+  storyAssetContentType,
+};

@@ -140,6 +140,74 @@
         margin-right: 6px;
         font-size: 12px;
       }
+      .story-row {
+        display: flex;
+        gap: 20px;
+        flex-wrap: wrap;
+        margin-top: 10px;
+      }
+      .story-frame {
+        width: 180px;
+        flex-shrink: 0;
+        aspect-ratio: 9 / 16;
+        background: #000;
+        border-radius: 16px;
+        overflow: hidden;
+        border: 2px solid #2b4679;
+        position: relative;
+      }
+      .story-frame video {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
+      .quality-badge {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        background: rgba(0, 0, 0, 0.7);
+        color: #7dd3fc;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        pointer-events: none;
+      }
+      .story-info {
+        flex: 1;
+        min-width: 200px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .story-btns {
+        display: flex;
+        gap: 8px;
+      }
+      .story-btns button {
+        flex: 1;
+      }
+      .btn-alt {
+        background: #14532d !important;
+        border-color: #16a34a !important;
+      }
+      .toggle-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 6px;
+      }
+      .toggle-row input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+        accent-color: #1d4ed8;
+        flex-shrink: 0;
+      }
+      .toggle-row label {
+        margin: 0;
+        font-size: 13px;
+        color: #9cc0ff;
+      }
     </style>
   </head>
   <body>
@@ -291,11 +359,76 @@
             />
           </div>
         </div>
-        <button id="uploadVideoBtn" onclick="uploadMedia('video')">
+        <div class="toggle-row">
+          <input type="checkbox" id="storyModeCheck" />
+          <label for="storyModeCheck"
+            >Story mode — generates HLS adaptive renditions (360p / 540p / 720p)
+            and MP4 fallback</label
+          >
+        </div>
+        <button
+          id="uploadVideoBtn"
+          onclick="uploadMedia('video')"
+          style="margin-top: 10px"
+        >
           Upload Video
         </button>
         <div class="result" id="uploadVideoResult"></div>
         <div class="url" id="videoInstances">-</div>
+      </div>
+
+      <div class="card">
+        <h2>Story Player</h2>
+        <div class="row" style="align-items: flex-end">
+          <div>
+            <label>Video path/public_id</label>
+            <input
+              id="storyPath"
+              type="text"
+              placeholder="e.g. stories/clip.mp4"
+            />
+          </div>
+          <div>
+            <label>Snapshot (poster)</label>
+            <input
+              id="storySnapshotPath"
+              type="text"
+              placeholder="auto-filled from upload"
+            />
+          </div>
+        </div>
+        <div class="story-row">
+          <div class="story-frame">
+            <video id="storyVideo" playsinline controls></video>
+            <div
+              class="quality-badge"
+              id="storyQualityBadge"
+              style="display: none"
+            ></div>
+          </div>
+          <div class="story-info">
+            <div class="story-btns">
+              <button onclick="playStory('hls')">▶ Play HLS (adaptive)</button>
+              <button class="btn-alt" onclick="playStory('fallback')">
+                ▶ Play MP4 fallback
+              </button>
+            </div>
+            <button
+              onclick="stopStory()"
+              style="background: #7f1d1d; border-color: #991b1b"
+            >
+              ■ Stop
+            </button>
+            <div
+              class="result show"
+              id="storyStatus"
+              style="display: block; font-size: 12px"
+            >
+              Not playing. Upload a story video or enter a path above.
+            </div>
+            <div class="meta" id="storyMeta"></div>
+          </div>
+        </div>
       </div>
 
       <div class="card">
@@ -311,6 +444,8 @@
               <option value="">full</option>
               <option value="preview">preview</option>
               <option value="snapshot">snapshot</option>
+              <option value="story">story (HLS master)</option>
+              <option value="story-fallback">story-fallback (MP4)</option>
             </select>
           </div>
         </div>
@@ -348,7 +483,7 @@
         el.classList.add("show");
       }
 
-      function renderVideoInstances(variants) {
+      function renderVideoInstances(variants, story) {
         const el = document.getElementById("videoInstances");
         if (!variants) {
           el.textContent = "-";
@@ -363,14 +498,24 @@
         const previewUrl = previewPath ? getBase() + previewPath : "-";
         const snapshotUrl = snapshotPath ? getBase() + snapshotPath : "-";
 
-        el.innerHTML =
+        let html =
           "Instances after upload:" +
-          "<br>1. full (video/webm): " +
+          "<br>1. full (video/mp4): " +
           fullUrl +
           "<br>2. preview (video/webm, 10s): " +
           previewUrl +
           "<br>3. snapshot (image/webp): " +
           snapshotUrl;
+
+        if (story && story.enabled && story.variants) {
+          html +=
+            "<br>4. story HLS (adaptive): " +
+            (getBase() + story.variants.hls) +
+            "<br>5. story fallback (MP4): " +
+            (getBase() + story.variants.fallback);
+        }
+
+        el.innerHTML = html;
       }
 
       function buildMediaUrl(resourceType, transformations, publicId) {
@@ -466,7 +611,16 @@
         btn.textContent = "Uploading...";
 
         try {
-          const res = await fetch(getBase() + "/upload", {
+          const storyMode =
+            isVideo && document.getElementById("storyModeCheck").checked;
+          const uploadUrl =
+            getBase() + "/upload" + (storyMode ? "?story=true" : "");
+
+          btn.textContent = storyMode
+            ? "Uploading & generating story HLS (this may take a minute)…"
+            : "Uploading & processing…";
+
+          const res = await fetch(uploadUrl, {
             method: "POST",
             headers: { "X-API-Key": getApiKey() },
             body: form,
@@ -482,7 +636,12 @@
             const publicId = data.key.replace(/^originals\//, "");
             if (isVideo) {
               document.getElementById("vidPath").value = publicId;
-              renderVideoInstances(data.variants);
+              document.getElementById("storyPath").value = publicId;
+              if (data.variants && data.variants.snapshot) {
+                document.getElementById("storySnapshotPath").value =
+                  publicId + "?target=snapshot";
+              }
+              renderVideoInstances(data.variants, data.story);
             } else {
               document.getElementById("imgPath").value = publicId;
             }
@@ -596,6 +755,158 @@
           btn.textContent = isVideo ? "Transform Video" : "Transform Image";
         }
       }
+
+      // ── Story Player ─────────────────────────────────────────────────────
+
+      let hlsInstance = null;
+
+      function loadHlsJs(cb) {
+        if (window.Hls) {
+          cb();
+          return;
+        }
+        const s = document.createElement("script");
+        s.src = "https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js";
+        s.onload = cb;
+        document.head.appendChild(s);
+      }
+
+      function stopStory() {
+        const vid = document.getElementById("storyVideo");
+        if (hlsInstance) {
+          hlsInstance.destroy();
+          hlsInstance = null;
+        }
+        vid.pause();
+        vid.removeAttribute("src");
+        vid.load();
+        document.getElementById("storyQualityBadge").style.display = "none";
+        document.getElementById("storyStatus").textContent = "Stopped.";
+        document.getElementById("storyMeta").textContent = "";
+      }
+
+      function setStoryStatus(msg) {
+        document.getElementById("storyStatus").textContent = msg;
+      }
+
+      function playStory(mode) {
+        const rawPath = document.getElementById("storyPath").value.trim();
+        if (!rawPath) {
+          setStoryStatus("Enter a video path first.");
+          return;
+        }
+
+        const publicId = rawPath.replace(/^originals\//, "");
+        const base = getBase();
+        const snapshotRaw = document
+          .getElementById("storySnapshotPath")
+          .value.trim();
+        const posterUrl = snapshotRaw
+          ? base + "/video/upload/" + snapshotRaw
+          : base + "/video/upload/" + publicId + "?target=snapshot";
+
+        stopStory();
+
+        const vid = document.getElementById("storyVideo");
+        vid.poster = posterUrl;
+
+        if (mode === "fallback") {
+          const src =
+            base + "/video/upload/" + publicId + "?target=story-fallback";
+          vid.src = src;
+          vid.play().catch(() => {});
+          setStoryStatus("Playing MP4 fallback…");
+          document.getElementById("storyMeta").textContent = src;
+          return;
+        }
+
+        // HLS mode
+        const manifestUrl =
+          base + "/video/upload/" + publicId + "?target=story";
+        setStoryStatus("Loading hls.js…");
+
+        if (window.Hls && Hls.isSupported()) {
+          // hls.js already available — use it directly
+          _attachHls(vid, manifestUrl);
+        } else {
+          loadHlsJs(function () {
+            if (!window.Hls) {
+              setStoryStatus("hls.js failed to load — try fallback.");
+              return;
+            }
+            if (Hls.isSupported()) {
+              _attachHls(vid, manifestUrl);
+            } else if (vid.canPlayType("application/vnd.apple.mpegurl")) {
+              vid.src = manifestUrl;
+              vid.play().catch(() => {});
+              setStoryStatus("Playing via native HLS (Safari)…");
+              document.getElementById("storyMeta").textContent = manifestUrl;
+            } else {
+              setStoryStatus("HLS not supported — switching to MP4 fallback.");
+              playStory("fallback");
+            }
+          });
+        }
+      }
+
+      function _attachHls(vid, manifestUrl) {
+        const hls = new Hls({
+          startLevel: -1,
+          abrEwmaFastLive: 3,
+          abrEwmaSlowLive: 9,
+          maxBufferLength: 20,
+          maxMaxBufferLength: 60,
+        });
+        hlsInstance = hls;
+        hls.loadSource(manifestUrl);
+        hls.attachMedia(vid);
+
+        const badge = document.getElementById("storyQualityBadge");
+        const meta = document.getElementById("storyMeta");
+
+        hls.on(Hls.Events.MANIFEST_PARSED, function (_, data) {
+          setStoryStatus(
+            "Manifest parsed — " +
+              data.levels.length +
+              " quality levels. Buffering…",
+          );
+          vid.play().catch(() => {});
+          badge.style.display = "block";
+        });
+
+        hls.on(Hls.Events.LEVEL_SWITCHED, function (_, data) {
+          const lvl = hls.levels[data.level];
+          if (!lvl) return;
+          badge.textContent =
+            lvl.height + "p · " + Math.round(lvl.bitrate / 1000) + " kbps";
+          meta.textContent =
+            "Level " +
+            data.level +
+            " | " +
+            lvl.width +
+            "x" +
+            lvl.height +
+            " | " +
+            Math.round(lvl.bitrate / 1000) +
+            " kbps | src: " +
+            manifestUrl;
+        });
+
+        hls.on(Hls.Events.ERROR, function (_, data) {
+          if (data.fatal) {
+            setStoryStatus(
+              "HLS fatal error: " + data.type + " — " + data.details,
+            );
+            hls.destroy();
+            hlsInstance = null;
+          }
+        });
+
+        setStoryStatus("Fetching manifest…");
+      }
+
+      // Eager-load hls.js so first play is instant
+      loadHlsJs(function () {});
 
       function bindPreviewEvents() {
         [

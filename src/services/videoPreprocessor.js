@@ -5,8 +5,10 @@ const { checkCache, saveToCache } = require("./cacheService");
 const {
   processVideo,
   extractSnapshot,
+  processStoryHls,
 } = require("../processors/videoProcessor");
 const crypto = require("crypto");
+const { storyAssetKey, storyFallbackParams } = require("./storyVideoService");
 
 const SNAPSHOT_SECOND = 1;
 const PREVIEW_DURATION = 10;
@@ -47,7 +49,7 @@ function fullParams() {
   return params;
 }
 
-async function preprocessVideo(originalKey, relativePath, logger) {
+async function preprocessVideo(originalKey, relativePath, logger, opts = {}) {
   let originalBuffer;
   try {
     const original = await getObjectBuffer(originalKey);
@@ -117,6 +119,54 @@ async function preprocessVideo(originalKey, relativePath, logger) {
     }
   } catch (err) {
     logger.error({ error: err.message }, "Failed to create full variant");
+  }
+
+  // 4) Story-specific assets (only when requested at upload time)
+  if (opts.story === true) {
+    try {
+      const baseQueryPath = `/video/upload/${relativePath}`;
+      const masterKey = storyAssetKey(originalKey, "master.m3u8");
+      const cached = await checkCache(masterKey);
+      if (cached) {
+        logger.info(
+          { derivedKey: masterKey },
+          "Story HLS already cached, skipping",
+        );
+      } else {
+        const { assets } = await processStoryHls(originalBuffer, baseQueryPath);
+        for (const asset of assets) {
+          const key = storyAssetKey(originalKey, asset.name);
+          await saveToCache(key, asset.buffer, asset.contentType);
+        }
+        logger.info(
+          { derivedKey: masterKey, assetCount: assets.length },
+          "Story HLS assets created",
+        );
+      }
+    } catch (err) {
+      logger.error({ error: err.message }, "Failed to create story HLS assets");
+    }
+
+    try {
+      const params = storyFallbackParams();
+      const derivedKey = generateDerivedKey(originalKey, params);
+      const cached = await checkCache(derivedKey);
+      if (cached) {
+        logger.info({ derivedKey }, "Story fallback already cached, skipping");
+      } else {
+        const { buffer, contentType } = await processVideo(
+          originalBuffer,
+          params,
+        );
+        await saveToCache(derivedKey, buffer, contentType);
+        logger.info(
+          { derivedKey, size: buffer.length },
+          "Story fallback created",
+        );
+      }
+    } catch (err) {
+      logger.error({ error: err.message }, "Failed to create story fallback");
+    }
   }
 }
 

@@ -68,6 +68,24 @@ For **video** files, a `variants` field is also returned:
 }
 ```
 
+If you upload with `?story=true`, the response also includes a `story` section:
+
+```json
+{
+  "key": "originals/stories/1712345678456.mp4",
+  "size": 5242880,
+  "type": "video",
+  "url": "/video/upload/stories/1712345678456.mp4",
+  "story": {
+    "enabled": true,
+    "variants": {
+      "hls": "/video/upload/stories/1712345678456.mp4?target=story",
+      "fallback": "/video/upload/stories/1712345678456.mp4?target=story-fallback"
+    }
+  }
+}
+```
+
 > **Note:** Video variants (full quality, preview, snapshot) are generated **in the background** after upload. They may not be immediately available. Retry after a few seconds if you get a 503.
 
 ### Code Examples
@@ -86,6 +104,22 @@ const res = await fetch("https://media_server.ramaaz.dev/upload", {
 });
 const data = await res.json();
 console.log(data.url); // "/image/upload/products/1712345678123.jpg"
+```
+
+**Story video upload (opt-in):**
+
+```js
+const form = new FormData();
+form.append("file", fileBlob, "story.mp4");
+
+const res = await fetch("https://media_server.ramaaz.dev/upload?story=true", {
+  method: "POST",
+  headers: { "x-api-key": "YOUR_API_KEY" },
+  body: form,
+});
+
+const data = await res.json();
+console.log(data.story?.variants?.hls);
 ```
 
 **cURL**
@@ -287,11 +321,13 @@ GET /video/upload/<file-path>?target=<variant>
 
 ### Video Variants
 
-| `?target=`  | Description                                               | Format | Dimensions |
-| ----------- | --------------------------------------------------------- | ------ | ---------- |
-| _(omitted)_ | **Full quality** video — best for main playback           | WebM   | 1280×630   |
-| `preview`   | **Short preview** — first 10 seconds in smaller size      | WebM   | 400×600    |
-| `snapshot`  | **Thumbnail image** — a single frame captured at 1 second | WebP   | —          |
+| `?target=`       | Description                                               | Format | Dimensions     |
+| ---------------- | --------------------------------------------------------- | ------ | -------------- |
+| _(omitted)_      | **Full quality** video — best for main playback           | WebM   | 1280×630       |
+| `preview`        | **Short preview** — first 10 seconds in smaller size      | WebM   | 400×600        |
+| `snapshot`       | **Thumbnail image** — a single frame captured at 1 second | WebP   | —              |
+| `story`          | **Story HLS manifest** (ABR-style playlists/segments)     | HLS    | 360p/540p/720p |
+| `story-fallback` | **Story MP4 fallback** for clients without HLS support    | MP4    | 720×1280       |
 
 ### Video URL Examples
 
@@ -418,9 +454,3 @@ const base = "https://media_server.ramaaz.dev";
 // 2. Use in JSX / HTML
 // <video poster={base + result.variants.snapshot} src={base + result.variants.full} controls />
 ```
-
-<!-- Api key right now is
-
-
-pfxqJTg8PgGf9rKEyvred+odXPgGU4wFtOJnJPUlqng dell@DESKTOP-0DHEE8R
- -->

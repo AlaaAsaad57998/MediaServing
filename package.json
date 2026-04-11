@@ -10,7 +10,9 @@
     "migrate:dry": "node src/scripts/migrate-cloudinary.js --dry-run",
     "migrate:full": "node src/scripts/migrate-cloudinary.js --limit 0",
     "preprocess-videos": "node src/scripts/preprocess-videos.js",
-    "preprocess-videos:dry": "node src/scripts/preprocess-videos.js --dry-run"
+    "preprocess-videos:dry": "node src/scripts/preprocess-videos.js --dry-run",
+    "fetch-video": "node src/scripts/fetch-and-upload.js",
+    "fetch-video:story": "node src/scripts/fetch-and-upload.js --story --folder stories"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.800.0",

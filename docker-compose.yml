@@ -18,6 +18,8 @@ services:
       - redis
     volumes:
       - ./src:/app/src
+      - ./test.html:/app/test.html:ro
+      - ./compare.html:/app/compare.html:ro
       - ./.env.development:/app/.env.development:ro
     command: node --watch src/index.js
     restart: unless-stopped

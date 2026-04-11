@@ -6,6 +6,15 @@ const {
   preprocessVideo,
   getVariantUrls,
 } = require("../services/videoPreprocessor");
+const { getStoryUrls } = require("../services/storyVideoService");
+const { probeDuration } = require("../processors/videoProcessor");
+
+function isTrueLike(value) {
+  if (Array.isArray(value)) return isTrueLike(value[0]);
+  if (value == null) return false;
+  const raw = String(value).trim().toLowerCase();
+  return raw === "true" || raw === "1" || raw === "yes";
+}
 
 function resolveExtension(filename, mimetype) {
   const originalExt = path
@@ -16,7 +25,13 @@ function resolveExtension(filename, mimetype) {
   return originalExt || mimeExt || "jpg";
 }
 
-async function saveUploadedImage(buffer, filename, mimetype, folder) {
+async function saveUploadedImage(
+  buffer,
+  filename,
+  mimetype,
+  folder,
+  opts = {},
+) {
   const extension = resolveExtension(filename, mimetype);
   const generatedFilename = `${Date.now()}${Math.floor(Math.random() * 1000)}.${extension}`;
   const key = folder
@@ -39,6 +54,12 @@ async function saveUploadedImage(buffer, filename, mimetype, folder) {
 
   if (isVideo) {
     result.variants = getVariantUrls(relativePath);
+    if (opts.story === true) {
+      result.story = {
+        enabled: true,
+        variants: getStoryUrls(relativePath),
+      };
+    }
   }
 
   return result;
@@ -71,6 +92,7 @@ async function uploadRoutes(fastify) {
       },
     },
     async (request, reply) => {
+      const storyMode = isTrueLike(request.query?.story);
       const data = await request.file();
 
       if (!data) {
@@ -94,19 +116,25 @@ async function uploadRoutes(fastify) {
         data.filename,
         data.mimetype,
         folder,
+        { story: storyMode },
       );
 
       if (item.type === "video") {
-        preprocessVideo(
-          item.key,
-          item.key.replace(/^originals\//, ""),
-          request.log,
-        ).catch((err) => {
+        item.durationSeconds = await probeDuration(buffer).catch(() => 0);
+        try {
+          await preprocessVideo(
+            item.key,
+            item.key.replace(/^originals\//, ""),
+            request.log,
+            { story: storyMode },
+          );
+        } catch (err) {
           request.log.error(
             { error: err.message },
-            "Background video preprocessing failed",
+            "Video preprocessing failed",
           );
-        });
+          return reply.code(500).send({ error: "Video processing failed" });
+        }
       }
 
       return reply.code(201).send(item);
@@ -121,6 +149,7 @@ async function uploadRoutes(fastify) {
       },
     },
     async (request, reply) => {
+      const storyMode = isTrueLike(request.query?.story);
       let folder = "";
       const items = [];
 
@@ -154,19 +183,11 @@ async function uploadRoutes(fastify) {
           part.filename,
           part.mimetype,
           folder,
+          { story: storyMode },
         );
 
         if (item.type === "video") {
-          preprocessVideo(
-            item.key,
-            item.key.replace(/^originals\//, ""),
-            request.log,
-          ).catch((err) => {
-            request.log.error(
-              { error: err.message },
-              "Background video preprocessing failed",
-            );
-          });
+          item.durationSeconds = await probeDuration(buffer).catch(() => 0);
         }
 
         items.push(item);
@@ -174,6 +195,28 @@ async function uploadRoutes(fastify) {
 
       if (items.length === 0) {
         return reply.code(400).send({ error: "At least one file is required" });
+      }
+
+      const videoItems = items.filter((i) => i.type === "video");
+      if (videoItems.length > 0) {
+        const results = await Promise.allSettled(
+          videoItems.map((i) =>
+            preprocessVideo(
+              i.key,
+              i.key.replace(/^originals\//, ""),
+              request.log,
+              { story: storyMode },
+            ),
+          ),
+        );
+        const failed = results.find((r) => r.status === "rejected");
+        if (failed) {
+          request.log.error(
+            { error: failed.reason?.message },
+            "Video preprocessing failed during bulk upload",
+          );
+          return reply.code(500).send({ error: "Video processing failed" });
+        }
       }
 
       const urls = items.map((i) => i.url);
