@@ -355,7 +355,9 @@ async function main() {
   console.log(`  Content-Type : ${mimeType}`);
   console.log(`  Size         : ${sizeLabel}`);
   console.log(`  Upload name  : ${filename}`);
-  console.log("  Note         : use the returned public_id after upload completes");
+  console.log(
+    "  Note         : use the returned public_id after upload completes",
+  );
   if (remote.contentLength && remote.contentLength > uploadLimitBytes) {
     console.log(
       `  Warning      : remote file exceeds upload limit (${(uploadLimitBytes / 1024 / 1024).toFixed(1)} MB)`,
