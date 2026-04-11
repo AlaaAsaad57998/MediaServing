@@ -6,7 +6,14 @@ class ValidationError extends Error {
   }
 }
 
-const VALID_IMAGE_FORMATS = new Set(["webp", "jpeg", "jpg", "png", "avif"]);
+const VALID_IMAGE_FORMATS = new Set([
+  "webp",
+  "jpeg",
+  "jpg",
+  "png",
+  "avif",
+  "svg",
+]);
 const VALID_VIDEO_FORMATS = new Set(["mp4", "webm"]);
 const VALID_FORMATS = new Set([...VALID_IMAGE_FORMATS, ...VALID_VIDEO_FORMATS]);
 // Canonical Cloudinary-style crop modes we expose in URLs.

@@ -175,10 +175,18 @@ async function transformRoutes(fastify) {
   }
 
   // ──────────────────────────────────────────────────────────────────────
-  //  IMAGE — accept Cloudinary params but always force f=webp
+  //  IMAGE — accept Cloudinary params but always force f=webp,
+  //          except explicit SVG passthrough requests (f_svg).
   // ──────────────────────────────────────────────────────────────────────
 
   async function handleImage(reply, filePath, params) {
+    const isSvgFile = path.extname(filePath).toLowerCase() === ".svg";
+
+    // Explicit SVG output should return the original source untouched.
+    if (params.f === "svg" && isSvgFile) {
+      return sendOriginal(filePath, reply);
+    }
+
     // Always output webp regardless of f_ param
     params.f = "webp";
 
@@ -400,7 +408,8 @@ async function transformRoutes(fastify) {
 
   // ── Route registration ─────────────────────────────────────────────────
   // Accepts Cloudinary-style URLs; transforms parsed but:
-  //   - Images: all params used EXCEPT format (always webp)
+  //   - Images: all params used EXCEPT format (always webp),
+  //             unless f_svg is requested for a .svg source (serve original)
   //   - Videos: all URL params ignored, only ?target= matters
 
   fastify.get("/:resourceType/upload/*", routeConfig, handleRequest);
