@@ -202,8 +202,7 @@ function buildMultipart(fileStream, filename, mimeType, folder) {
 
 function uploadStream(bodyStream, boundary, opts) {
   return new Promise((resolve, reject) => {
-    const uploadPath =
-      "/upload" + (opts.story ? "?story=true" : "");
+    const uploadPath = "/upload" + (opts.story ? "?story=true" : "");
     const parsed = new URL(opts.apiUrl + uploadPath);
     const transport = parsed.protocol === "https:" ? https : http;
 
@@ -231,7 +230,9 @@ function uploadStream(bodyStream, boundary, opts) {
           json = JSON.parse(body);
         } catch {
           return reject(
-            new Error(`Non-JSON response (HTTP ${res.statusCode}): ${body.slice(0, 300)}`),
+            new Error(
+              `Non-JSON response (HTTP ${res.statusCode}): ${body.slice(0, 300)}`,
+            ),
           );
         }
         if (res.statusCode >= 400) {
@@ -275,7 +276,9 @@ async function main() {
   const opts = parseArgs(process.argv);
 
   if (!opts.url) {
-    console.error("Usage: node src/scripts/fetch-and-upload.js <url> [options]");
+    console.error(
+      "Usage: node src/scripts/fetch-and-upload.js <url> [options]",
+    );
     process.exit(1);
   }
 
@@ -288,7 +291,9 @@ async function main() {
   }
 
   console.log("=== fetch-and-upload ===");
-  console.log(`  Remote URL : ${opts.url.slice(0, 80)}${opts.url.length > 80 ? "…" : ""}`);
+  console.log(
+    `  Remote URL : ${opts.url.slice(0, 80)}${opts.url.length > 80 ? "…" : ""}`,
+  );
   console.log(`  Target API : ${opts.apiUrl}`);
   console.log(`  Folder     : ${opts.folder}`);
   console.log(`  Story mode : ${opts.story}`);
@@ -308,7 +313,8 @@ async function main() {
 
   const ext = guessExtension(remote.contentType, opts.url, opts.filename);
   const filename = buildFilename(opts.filename, ext);
-  const mimeType = remote.contentType.split(";")[0].trim() || `application/${ext}`;
+  const mimeType =
+    remote.contentType.split(";")[0].trim() || `application/${ext}`;
   const sizeLabel = remote.contentLength
     ? `${(remote.contentLength / 1024 / 1024).toFixed(1)} MB`
     : "unknown size";
@@ -347,7 +353,9 @@ async function main() {
   console.log("=== Upload complete ===\n");
   console.log(`  public_id       : ${publicId}`);
   console.log(`  key             : ${data.key}`);
-  console.log(`  size            : ${data.size ? (data.size / 1024 / 1024).toFixed(2) + " MB" : "-"}`);
+  console.log(
+    `  size            : ${data.size ? (data.size / 1024 / 1024).toFixed(2) + " MB" : "-"}`,
+  );
   if (data.durationSeconds != null) {
     console.log(`  duration        : ${data.durationSeconds.toFixed(1)}s`);
   }
