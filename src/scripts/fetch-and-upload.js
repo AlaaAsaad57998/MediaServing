@@ -152,11 +152,35 @@ function guessExtension(contentType, rawUrl, overrideName) {
   return "bin";
 }
 
-function buildFilename(overrideName, ext) {
+function sanitizeFilename(name) {
+  return String(name || "")
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function deriveFilenameFromUrl(rawUrl) {
+  try {
+    const urlPath = decodeURIComponent(new URL(rawUrl).pathname);
+    const base = path.basename(urlPath).trim();
+    return sanitizeFilename(base);
+  } catch {
+    return "";
+  }
+}
+
+function buildFilename(overrideName, rawUrl, ext) {
   if (overrideName) {
     const existing = path.extname(overrideName);
     return existing ? overrideName : `${overrideName}.${ext}`;
   }
+
+  const derived = deriveFilenameFromUrl(rawUrl);
+  if (derived) {
+    const existing = path.extname(derived);
+    return existing ? derived : `${derived}.${ext}`;
+  }
+
   return `${Date.now()}.${ext}`;
 }
 
@@ -270,6 +294,14 @@ function startTicker(label) {
   };
 }
 
+function getUploadLimitBytes() {
+  const mb = Number.parseInt(process.env.UPLOAD_MAX_FILE_SIZE_MB || "100", 10);
+  if (!Number.isFinite(mb) || mb <= 0) {
+    return 100 * 1024 * 1024;
+  }
+  return mb * 1024 * 1024;
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -312,16 +344,23 @@ async function main() {
   }
 
   const ext = guessExtension(remote.contentType, opts.url, opts.filename);
-  const filename = buildFilename(opts.filename, ext);
+  const filename = buildFilename(opts.filename, opts.url, ext);
   const mimeType =
     remote.contentType.split(";")[0].trim() || `application/${ext}`;
   const sizeLabel = remote.contentLength
     ? `${(remote.contentLength / 1024 / 1024).toFixed(1)} MB`
     : "unknown size";
+  const uploadLimitBytes = getUploadLimitBytes();
 
   console.log(`  Content-Type : ${mimeType}`);
   console.log(`  Size         : ${sizeLabel}`);
-  console.log(`  Filename     : ${filename}`);
+  console.log(`  Upload name  : ${filename}`);
+  console.log("  Note         : use the returned public_id after upload completes");
+  if (remote.contentLength && remote.contentLength > uploadLimitBytes) {
+    console.log(
+      `  Warning      : remote file exceeds upload limit (${(uploadLimitBytes / 1024 / 1024).toFixed(1)} MB)`,
+    );
+  }
   console.log("");
 
   // 2. Stream-pipe: download → multipart → upload

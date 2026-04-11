@@ -95,9 +95,9 @@ function buildApp(opts = {}) {
     },
   });
 
-  // Register multipart support (100 MB file size limit — supports video uploads)
+  // Register multipart support (120 MB file size limit — supports video uploads)
   const maxFileSize =
-    Number.parseInt(process.env.UPLOAD_MAX_FILE_SIZE_MB || "100", 10) *
+    Number.parseInt(process.env.UPLOAD_MAX_FILE_SIZE_MB || "120", 10) *
     1024 *
     1024;
   app.register(multipart, { limits: { fileSize: maxFileSize } });
