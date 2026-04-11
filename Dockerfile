@@ -26,6 +26,9 @@ ENV NODE_ENV=production
 # Copy installed node_modules from the deps stage
 COPY --from=deps /app/node_modules ./node_modules
 
+# Keep package.json in runtime so yarn scripts (e.g. fetch-video:story) are usable via docker exec.
+COPY package.json ./
+
 # Copy application source and static HTML pages
 COPY src ./src
 COPY test.html compare.html ./
