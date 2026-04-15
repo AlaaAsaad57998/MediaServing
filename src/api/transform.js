@@ -24,14 +24,13 @@ const {
 } = require("../processors/videoProcessor");
 const {
   snapshotCacheKey,
+  webpCacheKey,
+  createWebpPosterVariant,
   previewParams,
   fullParams,
   SNAPSHOT_SECOND,
 } = require("../services/videoPreprocessor");
-const {
-  storyAssetKey,
-  storyFallbackParams,
-} = require("../services/storyVideoService");
+const { storyAssetKey } = require("../services/storyVideoService");
 
 function setMediaCacheHeaders(reply) {
   reply.header(
@@ -254,11 +253,18 @@ async function transformRoutes(fastify) {
   async function handleVideo(request, reply, filePath) {
     const originalKey = `originals/${filePath}`;
     const target = resolveVideoTarget(request);
-    const validTargets = ["snapshot", "preview", "story", "story-fallback", ""];
+    const validTargets = [
+      "snapshot",
+      "preview",
+      "webp",
+      "story",
+      "story-fallback",
+      "",
+    ];
     if (!validTargets.includes(target)) {
       return reply.code(400).send({
         error:
-          "Invalid target. Use snapshot, preview, story, story-fallback, or omit for full video",
+          "Invalid target. Use snapshot, preview, webp, story, story-fallback, or omit for full video",
       });
     }
 
@@ -271,14 +277,13 @@ async function transformRoutes(fastify) {
     if (target === "snapshot") {
       derivedKey = snapshotCacheKey(originalKey);
       variantName = "snapshot";
+    } else if (target === "webp" || target === "story-fallback") {
+      derivedKey = webpCacheKey(originalKey);
+      variantName = "webp";
     } else if (target === "preview") {
       variantParams = previewParams();
       derivedKey = generateDerivedKey(originalKey, variantParams);
       variantName = "preview";
-    } else if (target === "story-fallback") {
-      variantParams = storyFallbackParams();
-      derivedKey = generateDerivedKey(originalKey, variantParams);
-      variantName = "story-fallback";
     } else if (target === "story") {
       try {
         storyAssetName = sanitizeAssetName(
@@ -339,6 +344,9 @@ async function transformRoutes(fastify) {
           originalBuffer,
           SNAPSHOT_SECOND,
         ));
+      } else if (variantName === "webp") {
+        ({ buffer, contentType } =
+          await createWebpPosterVariant(originalBuffer));
       } else if (variantName === "story") {
         const storyPackLock = storyAssetKey(originalKey, "_story_pack.lock");
         const lockedStory = await acquireLock(storyPackLock);

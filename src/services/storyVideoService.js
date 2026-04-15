@@ -29,7 +29,7 @@ function getStoryUrls(relativePath) {
   const base = `/video/upload/${relativePath}`;
   return {
     hls: `${base}?target=story`,
-    fallback: `${base}?target=story-fallback`,
+    fallback: `${base}?target=webp`,
   };
 }
 
