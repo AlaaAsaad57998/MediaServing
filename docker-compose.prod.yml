@@ -30,7 +30,7 @@ services:
 
     mem_reservation: 1g
     mem_limit: 3g
-    cpus: "3.00"
+    cpus: "1.00"
     shm_size: 1g
     pids_limit: 512
 
