@@ -12,6 +12,10 @@ const { storyAssetKey, storyFallbackParams } = require("./storyVideoService");
 
 const SNAPSHOT_SECOND = 1;
 const PREVIEW_DURATION = 10;
+const VIDEO_PREPROCESS_CONCURRENCY = Math.max(
+  1,
+  Number.parseInt(process.env.VIDEO_PREPROCESS_CONCURRENCY || "2", 10) || 2,
+);
 
 const VIDEO_TRANSFORM_PRESETS = {
   // H.264/MP4: ~4× less RAM than VP9, faster encode, maximum device support.
@@ -49,6 +53,32 @@ function fullParams() {
   return params;
 }
 
+async function runWithConcurrency(tasks, concurrency) {
+  if (!Array.isArray(tasks) || tasks.length === 0) return [];
+  const results = [];
+  let cursor = 0;
+
+  async function worker() {
+    while (true) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= tasks.length) return;
+
+      const task = tasks[index];
+      try {
+        const value = await task();
+        results[index] = { status: "fulfilled", value };
+      } catch (error) {
+        results[index] = { status: "rejected", reason: error };
+      }
+    }
+  }
+
+  const workerCount = Math.min(concurrency, tasks.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
+}
+
 async function preprocessVideo(originalKey, relativePath, logger, opts = {}) {
   let originalBuffer;
   try {
@@ -62,13 +92,17 @@ async function preprocessVideo(originalKey, relativePath, logger, opts = {}) {
     return;
   }
 
-  // 1) Snapshot
-  try {
-    const snapKey = snapshotCacheKey(originalKey);
-    const cached = await checkCache(snapKey);
-    if (cached) {
-      logger.info({ derivedKey: snapKey }, "Snapshot already cached, skipping");
-    } else {
+  const tasks = [
+    async () => {
+      const snapKey = snapshotCacheKey(originalKey);
+      const cached = await checkCache(snapKey);
+      if (cached) {
+        logger.info(
+          { derivedKey: snapKey },
+          "Snapshot already cached, skipping",
+        );
+        return;
+      }
       const { buffer, contentType } = await extractSnapshot(
         originalBuffer,
         SNAPSHOT_SECOND,
@@ -78,52 +112,41 @@ async function preprocessVideo(originalKey, relativePath, logger, opts = {}) {
         { derivedKey: snapKey, size: buffer.length },
         "Snapshot created",
       );
-    }
-  } catch (err) {
-    logger.error({ error: err.message }, "Failed to create snapshot");
-  }
-
-  // 2) Preview (first 10 seconds)
-  try {
-    const params = previewParams();
-    const derivedKey = generateDerivedKey(originalKey, params);
-    const cached = await checkCache(derivedKey);
-    if (cached) {
-      logger.info({ derivedKey }, "Preview already cached, skipping");
-    } else {
+    },
+    async () => {
+      const params = previewParams();
+      const derivedKey = generateDerivedKey(originalKey, params);
+      const cached = await checkCache(derivedKey);
+      if (cached) {
+        logger.info({ derivedKey }, "Preview already cached, skipping");
+        return;
+      }
       const { buffer, contentType } = await processVideo(
         originalBuffer,
         params,
       );
       await saveToCache(derivedKey, buffer, contentType);
       logger.info({ derivedKey, size: buffer.length }, "Preview created");
-    }
-  } catch (err) {
-    logger.error({ error: err.message }, "Failed to create preview");
-  }
-
-  // 3) Full HD
-  try {
-    const params = fullParams();
-    const derivedKey = generateDerivedKey(originalKey, params);
-    const cached = await checkCache(derivedKey);
-    if (cached) {
-      logger.info({ derivedKey }, "Full variant already cached, skipping");
-    } else {
+    },
+    async () => {
+      const params = fullParams();
+      const derivedKey = generateDerivedKey(originalKey, params);
+      const cached = await checkCache(derivedKey);
+      if (cached) {
+        logger.info({ derivedKey }, "Full variant already cached, skipping");
+        return;
+      }
       const { buffer, contentType } = await processVideo(
         originalBuffer,
         params,
       );
       await saveToCache(derivedKey, buffer, contentType);
       logger.info({ derivedKey, size: buffer.length }, "Full variant created");
-    }
-  } catch (err) {
-    logger.error({ error: err.message }, "Failed to create full variant");
-  }
+    },
+  ];
 
-  // 4) Story-specific assets (only when requested at upload time)
   if (opts.story === true) {
-    try {
+    tasks.push(async () => {
       const baseQueryPath = `/video/upload/${relativePath}`;
       const masterKey = storyAssetKey(originalKey, "master.m3u8");
       const cached = await checkCache(masterKey);
@@ -132,41 +155,60 @@ async function preprocessVideo(originalKey, relativePath, logger, opts = {}) {
           { derivedKey: masterKey },
           "Story HLS already cached, skipping",
         );
-      } else {
-        const { assets } = await processStoryHls(originalBuffer, baseQueryPath);
-        for (const asset of assets) {
-          const key = storyAssetKey(originalKey, asset.name);
-          await saveToCache(key, asset.buffer, asset.contentType);
-        }
-        logger.info(
-          { derivedKey: masterKey, assetCount: assets.length },
-          "Story HLS assets created",
-        );
+        return;
       }
-    } catch (err) {
-      logger.error({ error: err.message }, "Failed to create story HLS assets");
-    }
+      const { assets } = await processStoryHls(originalBuffer, baseQueryPath);
+      await Promise.all(
+        assets.map((asset) =>
+          saveToCache(
+            storyAssetKey(originalKey, asset.name),
+            asset.buffer,
+            asset.contentType,
+          ),
+        ),
+      );
+      logger.info(
+        { derivedKey: masterKey, assetCount: assets.length },
+        "Story HLS assets created",
+      );
+    });
 
-    try {
+    tasks.push(async () => {
       const params = storyFallbackParams();
       const derivedKey = generateDerivedKey(originalKey, params);
       const cached = await checkCache(derivedKey);
       if (cached) {
         logger.info({ derivedKey }, "Story fallback already cached, skipping");
-      } else {
-        const { buffer, contentType } = await processVideo(
-          originalBuffer,
-          params,
-        );
-        await saveToCache(derivedKey, buffer, contentType);
-        logger.info(
-          { derivedKey, size: buffer.length },
-          "Story fallback created",
-        );
+        return;
       }
-    } catch (err) {
-      logger.error({ error: err.message }, "Failed to create story fallback");
+      const { buffer, contentType } = await processVideo(
+        originalBuffer,
+        params,
+      );
+      await saveToCache(derivedKey, buffer, contentType);
+      logger.info(
+        { derivedKey, size: buffer.length },
+        "Story fallback created",
+      );
+    });
+  }
+
+  const taskResults = await runWithConcurrency(
+    tasks,
+    VIDEO_PREPROCESS_CONCURRENCY,
+  );
+  const failures = taskResults
+    .filter((result) => result.status === "rejected")
+    .map((result) => result.reason);
+
+  if (failures.length > 0) {
+    for (const failure of failures) {
+      logger.error(
+        { error: failure?.message },
+        "Video variant generation failed",
+      );
     }
+    throw new Error("One or more video variants failed to generate");
   }
 }
 

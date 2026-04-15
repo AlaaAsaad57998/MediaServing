@@ -7,6 +7,10 @@ const sharp = require("sharp");
 
 const FFMPEG_BIN = process.env.FFMPEG_PATH || "ffmpeg";
 const FFPROBE_BIN = process.env.FFPROBE_PATH || "ffprobe";
+const STORY_HLS_TRANSCODE_CONCURRENCY = Math.max(
+  1,
+  Number.parseInt(process.env.STORY_HLS_TRANSCODE_CONCURRENCY || "2", 10) || 2,
+);
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -145,6 +149,23 @@ function rewritePlaylistUris(playlistText, baseQueryPath) {
     return `${baseQueryPath}?target=story&asset=${encodeURIComponent(trimmed)}`;
   });
   return `${rewritten.join("\n")}\n`;
+}
+
+async function runWithConcurrency(items, workerFn, concurrency) {
+  if (!Array.isArray(items) || items.length === 0) return;
+  let cursor = 0;
+
+  async function worker() {
+    while (true) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= items.length) return;
+      await workerFn(items[index]);
+    }
+  }
+
+  const workerCount = Math.min(Math.max(1, concurrency), items.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
 }
 
 // ── codec / format mapping ─────────────────────────────────────────────────
@@ -636,9 +657,11 @@ async function processStoryHls(inputBuffer, baseQueryPath) {
   ];
 
   try {
-    for (const rendition of renditions) {
-      await transcodeStoryVariant(inPath, outDir, rendition);
-    }
+    await runWithConcurrency(
+      renditions,
+      (rendition) => transcodeStoryVariant(inPath, outDir, rendition),
+      STORY_HLS_TRANSCODE_CONCURRENCY,
+    );
 
     const files = await fs.readdir(outDir);
     const assets = [];

@@ -59,6 +59,7 @@ For **video** files, a `variants` field is also returned:
   "key": "originals/clips/1712345678456.mp4",
   "size": 5242880,
   "type": "video",
+  "durationSeconds": 12.4,
   "url": "/video/upload/clips/1712345678456.mp4",
   "variants": {
     "full": "/video/upload/clips/1712345678456.mp4",
@@ -75,6 +76,7 @@ If you upload with `?story=true`, the response also includes a `story` section:
   "key": "originals/stories/1712345678456.mp4",
   "size": 5242880,
   "type": "video",
+  "durationSeconds": 12.4,
   "url": "/video/upload/stories/1712345678456.mp4",
   "story": {
     "enabled": true,
@@ -144,7 +146,7 @@ Upload up to **50 files** in a single request.
 
 | Field    | Type   | Required | Description                                         |
 | -------- | ------ | -------- | --------------------------------------------------- |
-| `file`   | file   | ✅ Yes   | One or more files (repeat this field for each file) |
+| `files`  | file   | ✅ Yes   | One or more files (repeat this field for each file) |
 | `folder` | string | ❌ No    | A single folder applied to **all** uploaded files   |
 
 ### Response `201 Created`
@@ -186,9 +188,9 @@ Upload up to **50 files** in a single request.
 ```js
 const form = new FormData();
 form.append("folder", "products"); // optional, applies to all files
-form.append("file", file1, "photo1.jpg");
-form.append("file", file2, "photo2.jpg");
-form.append("file", file3, "banner.png");
+form.append("files", file1, "photo1.jpg");
+form.append("files", file2, "photo2.jpg");
+form.append("files", file3, "banner.png");
 
 const res = await fetch("https://media_server.ramaaz.dev/upload/bulk", {
   method: "POST",
@@ -205,9 +207,9 @@ console.log(data.urls); // array of ready-to-use URLs
 curl -X POST https://media_server.ramaaz.dev/upload/bulk \
   -H "x-api-key: YOUR_API_KEY" \
   -F "folder=products" \
-  -F "file=@photo1.jpg" \
-  -F "file=@photo2.jpg" \
-  -F "file=@banner.png"
+  -F "files=@photo1.jpg" \
+  -F "files=@photo2.jpg" \
+  -F "files=@banner.png"
 ```
 
 ---
@@ -323,7 +325,7 @@ GET /video/upload/<file-path>?target=<variant>
 
 | `?target=`       | Description                                               | Format | Dimensions     |
 | ---------------- | --------------------------------------------------------- | ------ | -------------- |
-| _(omitted)_      | **Full quality** video — best for main playback           | WebM   | 1280×630       |
+| _(omitted)_      | **Full quality** video — best for main playback           | MP4    | 1280×630       |
 | `preview`        | **Short preview** — first 10 seconds in smaller size      | WebM   | 400×600        |
 | `snapshot`       | **Thumbnail image** — a single frame captured at 1 second | WebP   | —              |
 | `story`          | **Story HLS manifest** (ABR-style playlists/segments)     | HLS    | 360p/540p/720p |
@@ -368,20 +370,59 @@ https://media_server.ramaaz.dev/video/upload/clips/video.mp4?target=snapshot
 />
 ```
 
-> **Note:** After upload, variants are generated in the background so the first request is instant from cache. If you request a variant for a video that was **migrated to S3** without pre-processing, the server will generate it on-the-fly on the first request — this may take a few seconds for large videos. Subsequent requests will be served instantly from cache.
+> **Note:** For upload endpoints, video preprocessing runs before the success response is returned, so variants are usually ready immediately. If you request a variant for a video that was **migrated to S3** without preprocessing, the server will generate it on-the-fly on first request (this can take a few seconds for large files), then serve from cache afterward.
+
+> **Video upload response:** video items also include `durationSeconds`, which is the probed media duration in seconds.
+
+### StoryViewer Integration (HLS First, MP4 Fallback)
+
+For story playback clients, use this order:
+
+1. Use `story.variants.hls` when available (or derive `?target=story` from the base video URL).
+2. Use native HLS on Safari/iOS via `video.canPlayType("application/vnd.apple.mpegurl")`.
+3. Use `hls.js` on browsers without native HLS support.
+4. If HLS fails (fatal error), switch to `story.variants.fallback` (or `?target=story-fallback`).
+
+Recommended client story object shapes:
+
+```json
+{
+  "type": "image",
+  "url": "/image/upload/stories/1712345678001.jpg"
+}
+```
+
+```json
+{
+  "type": "video",
+  "durationSeconds": 12.4,
+  "url": "/video/upload/stories/1712345678456.mp4",
+  "story": {
+    "enabled": true,
+    "variants": {
+      "hls": "/video/upload/stories/1712345678456.mp4?target=story",
+      "fallback": "/video/upload/stories/1712345678456.mp4?target=story-fallback"
+    }
+  }
+}
+```
+
+Use `POST /upload?story=true` (or `/upload/bulk?story=true`) for video stories so story assets are prepared at upload time.
 
 ---
 
 ## Quick Reference Table
 
-| Action                     | Method | Endpoint                            | Auth Required |
-| -------------------------- | ------ | ----------------------------------- | ------------- |
-| Upload single file         | POST   | `/upload`                           | ✅ Yes        |
-| Bulk upload files          | POST   | `/upload/bulk`                      | ✅ Yes        |
-| Serve / transform image    | GET    | `/image/upload/...`                 | ❌ No         |
-| Serve full video           | GET    | `/video/upload/...`                 | ❌ No         |
-| Serve video preview clip   | GET    | `/video/upload/...?target=preview`  | ❌ No         |
-| Serve video snapshot/thumb | GET    | `/video/upload/...?target=snapshot` | ❌ No         |
+| Action                     | Method | Endpoint                                  | Auth Required |
+| -------------------------- | ------ | ----------------------------------------- | ------------- |
+| Upload single file         | POST   | `/upload`                                 | ✅ Yes        |
+| Bulk upload files          | POST   | `/upload/bulk`                            | ✅ Yes        |
+| Serve / transform image    | GET    | `/image/upload/...`                       | ❌ No         |
+| Serve full video           | GET    | `/video/upload/...`                       | ❌ No         |
+| Serve video preview clip   | GET    | `/video/upload/...?target=preview`        | ❌ No         |
+| Serve video snapshot/thumb | GET    | `/video/upload/...?target=snapshot`       | ❌ No         |
+| Serve story HLS manifest   | GET    | `/video/upload/...?target=story`          | ❌ No         |
+| Serve story MP4 fallback   | GET    | `/video/upload/...?target=story-fallback` | ❌ No         |
 
 ---
 
@@ -445,6 +486,7 @@ const result = await fetch("https://media_server.ramaaz.dev/upload", {
   body: form,
 }).then((r) => r.json());
 
+// result.durationSeconds   => 12.4
 // result.variants.snapshot  => "/video/upload/clips/....mp4?target=snapshot"
 // result.variants.preview   => "/video/upload/clips/....mp4?target=preview"
 // result.variants.full      => "/video/upload/clips/....mp4"
@@ -453,4 +495,28 @@ const base = "https://media_server.ramaaz.dev";
 
 // 2. Use in JSX / HTML
 // <video poster={base + result.variants.snapshot} src={base + result.variants.full} controls />
+```
+
+### Application — Upload story video and play with HLS + fallback
+
+```js
+const form = new FormData();
+form.append("file", storyVideoFile);
+form.append("folder", "stories");
+
+const result = await fetch(
+  "https://media_server.ramaaz.dev/upload?story=true",
+  {
+    method: "POST",
+    headers: { "x-api-key": process.env.MEDIA_API_KEY },
+    body: form,
+  },
+).then((r) => r.json());
+
+const base = "https://media_server.ramaaz.dev";
+const hlsUrl = base + result.story.variants.hls;
+const fallbackUrl = base + result.story.variants.fallback;
+const durationSeconds = result.durationSeconds;
+
+// StoryViewer should prefer hlsUrl and switch to fallbackUrl if HLS is unavailable/fails.
 ```
