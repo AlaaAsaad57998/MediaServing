@@ -13,6 +13,18 @@ services:
       S3_ACCESS_KEY: minioadmin
       S3_SECRET_KEY: minioadmin
       REDIS_URL: redis://redis:6379
+      NODE_OPTIONS: --max-old-space-size=2048
+      VIDEO_PREPROCESS_CONCURRENCY: "4"
+      STORY_HLS_TRANSCODE_CONCURRENCY: "3"
+      PREVIEW_DURATION_SECONDS: "6"
+      PREVIEW_VARIANT_TRANSFORM: w_400,h_600,f_mp4,vc_h264,q_65,c_fill
+      FFMPEG_X264_PRESET: superfast
+      FFMPEG_X265_PRESET: superfast
+      STORY_HLS_X264_PRESET: superfast
+      STORY_HLS_SEGMENT_SECONDS: "4"
+      FFMPEG_THREADS: "2"
+      FFMPEG_VP9_DEADLINE: realtime
+      FFMPEG_VP9_CPU_USED: "6"
     depends_on:
       - minio
       - redis
@@ -22,6 +34,11 @@ services:
       - ./compare.html:/app/compare.html:ro
       - ./.env.development:/app/.env.development:ro
     command: node --watch src/index.js
+    mem_reservation: 768m
+    mem_limit: 2g
+    cpus: "2.00"
+    shm_size: 512m
+    pids_limit: 400
     restart: unless-stopped
 
   minio:

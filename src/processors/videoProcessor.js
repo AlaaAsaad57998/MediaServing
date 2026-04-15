@@ -7,9 +7,22 @@ const sharp = require("sharp");
 
 const FFMPEG_BIN = process.env.FFMPEG_PATH || "ffmpeg";
 const FFPROBE_BIN = process.env.FFPROBE_PATH || "ffprobe";
+const FFMPEG_X264_PRESET = process.env.FFMPEG_X264_PRESET || "superfast";
+const FFMPEG_X265_PRESET = process.env.FFMPEG_X265_PRESET || "superfast";
+const FFMPEG_VP9_DEADLINE = process.env.FFMPEG_VP9_DEADLINE || "realtime";
+const FFMPEG_VP9_CPU_USED = process.env.FFMPEG_VP9_CPU_USED || "6";
+const FFMPEG_THREADS = Math.max(
+  0,
+  Number.parseInt(process.env.FFMPEG_THREADS || "2", 10) || 2,
+);
+const STORY_HLS_X264_PRESET = process.env.STORY_HLS_X264_PRESET || "superfast";
+const STORY_HLS_SEGMENT_SECONDS = Math.max(
+  2,
+  Number.parseInt(process.env.STORY_HLS_SEGMENT_SECONDS || "4", 10) || 4,
+);
 const STORY_HLS_TRANSCODE_CONCURRENCY = Math.max(
   1,
-  Number.parseInt(process.env.STORY_HLS_TRANSCODE_CONCURRENCY || "2", 10) || 2,
+  Number.parseInt(process.env.STORY_HLS_TRANSCODE_CONCURRENCY || "3", 10) || 3,
 );
 
 // ── helpers ────────────────────────────────────────────────────────────────
@@ -379,7 +392,7 @@ async function processVideo(inputBuffer, params) {
   if (vcodec === "libx264") {
     args.push(
       "-preset",
-      "medium", // smaller files than fast with acceptable encode time
+      FFMPEG_X264_PRESET,
       "-profile:v",
       "high",
       "-level",
@@ -396,7 +409,7 @@ async function processVideo(inputBuffer, params) {
   } else if (vcodec === "libx265") {
     args.push(
       "-preset",
-      "fast",
+      FFMPEG_X265_PRESET,
       "-crf",
       String(crf),
       "-pix_fmt",
@@ -411,16 +424,18 @@ async function processVideo(inputBuffer, params) {
       "-b:v",
       "0", // constant-quality mode
       "-deadline",
-      "good",
+      FFMPEG_VP9_DEADLINE,
       "-cpu-used",
-      "2",
+      FFMPEG_VP9_CPU_USED,
       "-row-mt",
       "1", // multi-threaded row encoding
       "-tile-columns",
       "2",
-      "-threads",
-      "4",
     );
+  }
+
+  if (FFMPEG_THREADS > 0) {
+    args.push("-threads", String(FFMPEG_THREADS));
   }
 
   // Audio codec
@@ -553,7 +568,7 @@ async function transcodeStoryVariant(inPath, outDir, rendition) {
     "-c:v",
     "libx264",
     "-preset",
-    "veryfast",
+    STORY_HLS_X264_PRESET,
     "-profile:v",
     "main",
     "-level",
@@ -581,7 +596,7 @@ async function transcodeStoryVariant(inPath, outDir, rendition) {
     "-ac",
     "2",
     "-hls_time",
-    "2",
+    String(STORY_HLS_SEGMENT_SECONDS),
     "-hls_playlist_type",
     "vod",
     "-hls_flags",
@@ -590,6 +605,10 @@ async function transcodeStoryVariant(inPath, outDir, rendition) {
     segmentPattern,
     outPlaylistPath,
   ];
+
+  if (FFMPEG_THREADS > 0) {
+    args.push("-threads", String(FFMPEG_THREADS));
+  }
 
   await new Promise((resolve, reject) => {
     const proc = spawn(FFMPEG_BIN, args, {

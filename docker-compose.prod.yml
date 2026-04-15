@@ -10,14 +10,29 @@ services:
 
     env_file: .env.production
 
+    environment:
+      NODE_OPTIONS: --max-old-space-size=2048
+      VIDEO_PREPROCESS_CONCURRENCY: "4"
+      STORY_HLS_TRANSCODE_CONCURRENCY: "3"
+      PREVIEW_DURATION_SECONDS: "6"
+      PREVIEW_VARIANT_TRANSFORM: w_400,h_600,f_mp4,vc_h264,q_65,c_fill
+      FFMPEG_X264_PRESET: superfast
+      FFMPEG_X265_PRESET: superfast
+      STORY_HLS_X264_PRESET: superfast
+      STORY_HLS_SEGMENT_SECONDS: "4"
+      FFMPEG_THREADS: "2"
+      FFMPEG_VP9_DEADLINE: realtime
+      FFMPEG_VP9_CPU_USED: "6"
+
     # ADMIN: ensure port 4001 is open in the firewall / security-group rules.
     ports:
       - "4001:3000"
 
-    mem_reservation: 256m
-    mem_limit: 512m
-    cpus: "1.00"
-    pids_limit: 200
+    mem_reservation: 1g
+    mem_limit: 3g
+    cpus: "3.00"
+    shm_size: 1g
+    pids_limit: 512
 
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
