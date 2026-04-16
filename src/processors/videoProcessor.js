@@ -368,6 +368,7 @@ async function processVideo(inputBuffer, params) {
     params,
     probeInfo,
   );
+  const isStoryDelivery = params.deliveryProfile === "story";
   const outPath = tmpPath(ext);
   const crf = resolveCrf(params, vcodec);
 
@@ -419,22 +420,42 @@ async function processVideo(inputBuffer, params) {
 
   // Codec-specific tuning for fast decode / smooth playback
   if (vcodec === "libx264") {
+    const maxRate = isStoryDelivery ? "1400k" : "2500k";
+    const bufSize = isStoryDelivery ? "2800k" : "5000k";
+    const profile = isStoryDelivery ? "main" : "high";
+    const level = isStoryDelivery ? "3.1" : "4.1";
     args.push(
       "-preset",
       FFMPEG_X264_PRESET,
+      "-tune",
+      "fastdecode",
       "-profile:v",
-      "high",
+      profile,
       "-level",
-      "4.1",
+      level,
       "-crf",
       String(crf),
       "-pix_fmt",
       "yuv420p", // maximum compatibility
       "-maxrate",
-      "2500k",
+      maxRate,
       "-bufsize",
-      "5000k",
+      bufSize,
     );
+
+    if (isStoryDelivery) {
+      // Story playback benefits from stable frame cadence and frequent keyframes.
+      args.push(
+        "-r",
+        "30",
+        "-g",
+        "60",
+        "-keyint_min",
+        "60",
+        "-sc_threshold",
+        "0",
+      );
+    }
   } else if (vcodec === "libx265") {
     args.push(
       "-preset",
@@ -474,7 +495,7 @@ async function processVideo(inputBuffer, params) {
   if (hasAudio) {
     args.push("-c:a", acodec);
     if (acodec === "aac") {
-      args.push("-b:a", "96k");
+      args.push("-b:a", isStoryDelivery ? "64k" : "96k");
     } else if (acodec === "libopus") {
       args.push("-b:a", "64k");
     }
