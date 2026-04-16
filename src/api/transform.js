@@ -19,8 +19,6 @@ const { processImage } = require("../processors/imageProcessor");
 const {
   processVideo,
   extractSnapshot,
-  processStoryHls,
-  sanitizeAssetName,
 } = require("../processors/videoProcessor");
 const {
   snapshotCacheKey,
@@ -30,7 +28,10 @@ const {
   fullParams,
   SNAPSHOT_SECOND,
 } = require("../services/videoPreprocessor");
-const { storyAssetKey } = require("../services/storyVideoService");
+const {
+  storyVideoCacheKey,
+  storyVideoParams,
+} = require("../services/storyVideoService");
 
 function setMediaCacheHeaders(reply) {
   reply.header(
@@ -40,16 +41,8 @@ function setMediaCacheHeaders(reply) {
   );
 }
 
-function setVideoDeliveryHeaders(reply, target, storyAssetName) {
+function setVideoDeliveryHeaders(reply) {
   reply.header("Accept-Ranges", "bytes");
-
-  if (target !== "story") return;
-
-  const lower = String(storyAssetName || "").toLowerCase();
-  if (lower.endsWith(".m3u8")) {
-    // Keep playlists fresh so clients can recover quickly if story assets regenerate.
-    reply.header("Cache-Control", "no-cache, no-store, must-revalidate");
-  }
 }
 
 /**
@@ -284,27 +277,19 @@ async function transformRoutes(fastify) {
     let derivedKey;
     let variantName;
     let variantParams;
-    let storyAssetName;
-
     if (target === "snapshot") {
       derivedKey = snapshotCacheKey(originalKey);
       variantName = "snapshot";
-    } else if (target === "webp" || target === "story-fallback") {
+    } else if (target === "webp") {
       derivedKey = webpCacheKey(originalKey);
       variantName = "webp";
     } else if (target === "preview") {
       variantParams = previewParams();
       derivedKey = generateDerivedKey(originalKey, variantParams);
       variantName = "preview";
-    } else if (target === "story") {
-      try {
-        storyAssetName = sanitizeAssetName(
-          request.query?.asset || "master.m3u8",
-        );
-      } catch {
-        return reply.code(400).send({ error: "Invalid story asset parameter" });
-      }
-      derivedKey = storyAssetKey(originalKey, storyAssetName);
+    } else if (target === "story" || target === "story-fallback") {
+      variantParams = storyVideoParams();
+      derivedKey = storyVideoCacheKey(originalKey);
       variantName = "story";
     } else {
       variantParams = fullParams();
@@ -317,7 +302,7 @@ async function transformRoutes(fastify) {
       const { buffer, contentType } = await getFromCache(derivedKey);
       reply.header("Content-Type", contentType);
       setMediaCacheHeaders(reply);
-      setVideoDeliveryHeaders(reply, target, storyAssetName);
+      setVideoDeliveryHeaders(reply);
       reply.header("X-Video-Target", variantName);
       reply.header("X-Cache", "HIT");
       return reply.send(buffer);
@@ -333,7 +318,7 @@ async function transformRoutes(fastify) {
         const { buffer, contentType } = await getFromCache(derivedKey);
         reply.header("Content-Type", contentType);
         setMediaCacheHeaders(reply);
-        setVideoDeliveryHeaders(reply, target, storyAssetName);
+        setVideoDeliveryHeaders(reply);
         reply.header("X-Video-Target", variantName);
         reply.header("X-Cache", "HIT");
         return reply.send(buffer);
@@ -362,33 +347,10 @@ async function transformRoutes(fastify) {
         ({ buffer, contentType } =
           await createWebpPosterVariant(originalBuffer));
       } else if (variantName === "story") {
-        const storyPackLock = storyAssetKey(originalKey, "_story_pack.lock");
-        const lockedStory = await acquireLock(storyPackLock);
-        if (!lockedStory) {
-          return serveFromCacheOrWait(derivedKey, reply);
-        }
-
-        try {
-          if (!(await checkCache(derivedKey))) {
-            const baseQueryPath = `/video/upload/${filePath}`;
-            const { assets } = await processStoryHls(
-              originalBuffer,
-              baseQueryPath,
-            );
-            for (const asset of assets) {
-              const assetKey = storyAssetKey(originalKey, asset.name);
-              await saveToCache(assetKey, asset.buffer, asset.contentType);
-            }
-          }
-        } finally {
-          await releaseLock(storyPackLock);
-        }
-
-        if (!(await checkCache(derivedKey))) {
-          return reply.code(404).send({ error: "Story asset not found" });
-        }
-
-        ({ buffer, contentType } = await getFromCache(derivedKey));
+        ({ buffer, contentType } = await processVideo(
+          originalBuffer,
+          variantParams,
+        ));
       } else {
         ({ buffer, contentType } = await processVideo(
           originalBuffer,
@@ -400,7 +362,7 @@ async function transformRoutes(fastify) {
 
       reply.header("Content-Type", contentType);
       setMediaCacheHeaders(reply);
-      setVideoDeliveryHeaders(reply, target, storyAssetName);
+      setVideoDeliveryHeaders(reply);
       reply.header("X-Video-Target", variantName);
       reply.header("X-Cache", "MISS");
       return reply.send(buffer);

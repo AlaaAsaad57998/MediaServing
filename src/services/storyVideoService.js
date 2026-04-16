@@ -2,8 +2,10 @@ const crypto = require("crypto");
 const { parseParams, resolveQAuto } = require("../utils/paramParser");
 
 const STORY_TRANSFORM_PRESET = {
-  // MP4 fallback used when HLS is not available on the client.
-  fallback: "w_720,h_1280,f_mp4,vc_h264,q_75,c_fill",
+  // Single fast story variant for both mobile and desktop playback.
+  video:
+    process.env.STORY_VARIANT_TRANSFORM ||
+    "w_720,h_1280,f_mp4,vc_h264,q_62,c_fit",
 };
 
 function storyHash(originalKey) {
@@ -17,8 +19,12 @@ function storyAssetKey(originalKey, assetName) {
   return `derived/${storyHash(originalKey)}/story/${assetName}`;
 }
 
-function storyFallbackParams() {
-  const params = parseParams(STORY_TRANSFORM_PRESET.fallback);
+function storyVideoCacheKey(originalKey) {
+  return storyAssetKey(originalKey, "story.mp4");
+}
+
+function storyVideoParams() {
+  const params = parseParams(STORY_TRANSFORM_PRESET.video);
   if (typeof params.q === "string" && params.q.startsWith("auto")) {
     params.q = resolveQAuto(params.q);
   }
@@ -28,14 +34,15 @@ function storyFallbackParams() {
 function getStoryUrls(relativePath) {
   const base = `/video/upload/${relativePath}`;
   return {
-    hls: `${base}?target=story`,
-    fallback: `${base}?target=webp`,
+    video: `${base}?target=story`,
+    snapshot: `${base}?target=snapshot`,
   };
 }
 
 module.exports = {
   STORY_TRANSFORM_PRESET,
   storyAssetKey,
-  storyFallbackParams,
+  storyVideoCacheKey,
+  storyVideoParams,
   getStoryUrls,
 };

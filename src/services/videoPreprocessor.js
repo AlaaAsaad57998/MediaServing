@@ -6,11 +6,10 @@ const {
   processVideo,
   extractSnapshot,
   extractRawFrame,
-  processStoryHls,
 } = require("../processors/videoProcessor");
 const crypto = require("crypto");
 const sharp = require("sharp");
-const { storyAssetKey } = require("./storyVideoService");
+const { storyVideoCacheKey, storyVideoParams } = require("./storyVideoService");
 
 const SNAPSHOT_SECOND = 1;
 const PREVIEW_DURATION = Math.max(
@@ -177,31 +176,19 @@ async function preprocessVideo(originalKey, relativePath, logger, opts = {}) {
 
   if (opts.story === true) {
     tasks.push(async () => {
-      const baseQueryPath = `/video/upload/${relativePath}`;
-      const masterKey = storyAssetKey(originalKey, "master.m3u8");
-      const cached = await checkCache(masterKey);
+      const derivedKey = storyVideoCacheKey(originalKey);
+      const cached = await checkCache(derivedKey);
       if (cached) {
-        logger.info(
-          { derivedKey: masterKey },
-          "Story HLS already cached, skipping",
-        );
+        logger.info({ derivedKey }, "Story variant already cached, skipping");
         return;
       }
 
-      const { assets } = await processStoryHls(originalBuffer, baseQueryPath);
-      await Promise.all(
-        assets.map((asset) =>
-          saveToCache(
-            storyAssetKey(originalKey, asset.name),
-            asset.buffer,
-            asset.contentType,
-          ),
-        ),
+      const { buffer, contentType } = await processVideo(
+        originalBuffer,
+        storyVideoParams(),
       );
-      logger.info(
-        { derivedKey: masterKey, assetCount: assets.length },
-        "Story HLS assets created",
-      );
+      await saveToCache(derivedKey, buffer, contentType);
+      logger.info({ derivedKey, size: buffer.length }, "Story variant created");
     });
   } else {
     tasks.push(
