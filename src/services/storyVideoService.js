@@ -9,7 +9,7 @@ const STORY_TRANSFORM_PRESET = {
 function storyHash(originalKey) {
   return crypto
     .createHash("sha256")
-    .update(`${originalKey}|story-hls@v1`)
+    .update(`${originalKey}|story-hls@v2`)
     .digest("hex");
 }
 

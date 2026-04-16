@@ -40,6 +40,18 @@ function setMediaCacheHeaders(reply) {
   );
 }
 
+function setVideoDeliveryHeaders(reply, target, storyAssetName) {
+  reply.header("Accept-Ranges", "bytes");
+
+  if (target !== "story") return;
+
+  const lower = String(storyAssetName || "").toLowerCase();
+  if (lower.endsWith(".m3u8")) {
+    // Keep playlists fresh so clients can recover quickly if story assets regenerate.
+    reply.header("Cache-Control", "no-cache, no-store, must-revalidate");
+  }
+}
+
 /**
  * Parse the wildcard path after `upload/` into Cloudinary-style chained
  * transformation segments and a file path (public_id).
@@ -305,6 +317,7 @@ async function transformRoutes(fastify) {
       const { buffer, contentType } = await getFromCache(derivedKey);
       reply.header("Content-Type", contentType);
       setMediaCacheHeaders(reply);
+      setVideoDeliveryHeaders(reply, target, storyAssetName);
       reply.header("X-Video-Target", variantName);
       reply.header("X-Cache", "HIT");
       return reply.send(buffer);
@@ -320,6 +333,7 @@ async function transformRoutes(fastify) {
         const { buffer, contentType } = await getFromCache(derivedKey);
         reply.header("Content-Type", contentType);
         setMediaCacheHeaders(reply);
+        setVideoDeliveryHeaders(reply, target, storyAssetName);
         reply.header("X-Video-Target", variantName);
         reply.header("X-Cache", "HIT");
         return reply.send(buffer);
@@ -386,6 +400,7 @@ async function transformRoutes(fastify) {
 
       reply.header("Content-Type", contentType);
       setMediaCacheHeaders(reply);
+      setVideoDeliveryHeaders(reply, target, storyAssetName);
       reply.header("X-Video-Target", variantName);
       reply.header("X-Cache", "MISS");
       return reply.send(buffer);

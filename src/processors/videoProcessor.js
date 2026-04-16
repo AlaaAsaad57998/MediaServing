@@ -138,11 +138,40 @@ function sanitizeAssetName(assetName) {
 
 function storyAssetContentType(assetName) {
   const name = sanitizeAssetName(assetName);
-  if (isLikelyPlaylist(name)) return "application/vnd.apple.mpegurl";
+  if (isLikelyPlaylist(name)) return "application/x-mpegURL";
   if (name.toLowerCase().endsWith(".ts")) return "video/mp2t";
   return "application/octet-stream";
 }
 
+function parseFps(value) {
+  if (!value || typeof value !== "string") return null;
+  if (!value.includes("/")) {
+    const direct = Number.parseFloat(value);
+    return Number.isFinite(direct) && direct > 0 ? direct : null;
+  }
+
+  const [numRaw, denRaw] = value.split("/");
+  const num = Number.parseFloat(numRaw);
+  const den = Number.parseFloat(denRaw);
+  if (!Number.isFinite(num) || !Number.isFinite(den) || den <= 0) {
+    return null;
+  }
+
+  const fps = num / den;
+  return Number.isFinite(fps) && fps > 0 ? fps : null;
+}
+
+function resolveStoryGopFrames(probeInfo) {
+  const videoStream = (probeInfo?.streams || []).find(
+    (s) => s.codec_type === "video",
+  );
+  const fps =
+    parseFps(videoStream?.avg_frame_rate) ||
+    parseFps(videoStream?.r_frame_rate) ||
+    24;
+  const raw = Math.round(fps * STORY_HLS_SEGMENT_SECONDS);
+  return Math.min(120, Math.max(24, raw));
+}
 function buildStoryMasterPlaylist(baseQueryPath, renditions) {
   const lines = ["#EXTM3U", "#EXT-X-VERSION:3"];
   for (const r of renditions) {
@@ -546,7 +575,7 @@ async function extractRawFrame(inputBuffer, timeSec = 0) {
   }
 }
 
-async function transcodeStoryVariant(inPath, outDir, rendition) {
+async function transcodeStoryVariant(inPath, outDir, rendition, gopFrames) {
   const playlistName = `${rendition.name}.m3u8`;
   const segmentPattern = path.join(outDir, `${rendition.name}_%03d.ts`);
   const outPlaylistPath = path.join(outDir, playlistName);
@@ -582,9 +611,9 @@ async function transcodeStoryVariant(inPath, outDir, rendition) {
     "-bufsize",
     rendition.bufSize,
     "-g",
-    "48",
+    String(gopFrames),
     "-keyint_min",
-    "48",
+    String(gopFrames),
     "-sc_threshold",
     "0",
     "-c:a",
@@ -644,6 +673,16 @@ async function processStoryHls(inputBuffer, baseQueryPath) {
 
   const renditions = [
     {
+      name: "r240",
+      w: 240,
+      h: 426,
+      videoBitrate: "280k",
+      maxRate: "380k",
+      bufSize: "700k",
+      audioBitrate: "48k",
+      bandwidth: 380000,
+    },
+    {
       name: "r360",
       w: 360,
       h: 640,
@@ -676,9 +715,13 @@ async function processStoryHls(inputBuffer, baseQueryPath) {
   ];
 
   try {
+    const probeInfo = await probe(inPath);
+    const gopFrames = resolveStoryGopFrames(probeInfo);
+
     await runWithConcurrency(
       renditions,
-      (rendition) => transcodeStoryVariant(inPath, outDir, rendition),
+      (rendition) =>
+        transcodeStoryVariant(inPath, outDir, rendition, gopFrames),
       STORY_HLS_TRANSCODE_CONCURRENCY,
     );
 

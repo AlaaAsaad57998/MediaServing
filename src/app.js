@@ -73,7 +73,8 @@ function buildApp(opts = {}) {
   app.register(cors, {
     origin: parseCorsOrigin(process.env.CORS_ORIGIN),
     methods: ["GET", "POST", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "X-API-Key"],
+    allowedHeaders: ["Content-Type", "X-API-Key", "Range"],
+    exposedHeaders: ["Content-Length", "Content-Range", "Accept-Ranges"],
   });
 
   app.register(rateLimit, {
