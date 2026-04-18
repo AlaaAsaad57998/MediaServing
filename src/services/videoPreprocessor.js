@@ -9,7 +9,12 @@ const {
 } = require("../processors/videoProcessor");
 const crypto = require("crypto");
 const sharp = require("sharp");
-const { storyVideoCacheKey, storyVideoParams } = require("./storyVideoService");
+const {
+  storyVideoCacheKey,
+  storyFallbackVideoCacheKey,
+  storyVideoParams,
+  storyFallbackVideoParams,
+} = require("./storyVideoService");
 
 const SNAPSHOT_SECOND = 1;
 const PREVIEW_DURATION = Math.max(
@@ -189,6 +194,28 @@ async function preprocessVideo(originalKey, relativePath, logger, opts = {}) {
       );
       await saveToCache(derivedKey, buffer, contentType);
       logger.info({ derivedKey, size: buffer.length }, "Story variant created");
+    });
+
+    tasks.push(async () => {
+      const derivedKey = storyFallbackVideoCacheKey(originalKey);
+      const cached = await checkCache(derivedKey);
+      if (cached) {
+        logger.info(
+          { derivedKey },
+          "Story fallback variant already cached, skipping",
+        );
+        return;
+      }
+
+      const { buffer, contentType } = await processVideo(
+        originalBuffer,
+        storyFallbackVideoParams(),
+      );
+      await saveToCache(derivedKey, buffer, contentType);
+      logger.info(
+        { derivedKey, size: buffer.length },
+        "Story fallback variant created",
+      );
     });
   } else {
     tasks.push(

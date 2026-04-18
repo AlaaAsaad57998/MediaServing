@@ -15,6 +15,15 @@ const FFMPEG_THREADS = Math.max(
   0,
   Number.parseInt(process.env.FFMPEG_THREADS || "2", 10) || 2,
 );
+const STORY_MP4_MAXRATE = process.env.STORY_MP4_MAXRATE || "1000k";
+const STORY_MP4_BUFSIZE = process.env.STORY_MP4_BUFSIZE || "2000k";
+const STORY_MP4_AUDIO_BITRATE = process.env.STORY_MP4_AUDIO_BITRATE || "48k";
+const STORY_FALLBACK_MP4_MAXRATE =
+  process.env.STORY_FALLBACK_MP4_MAXRATE || "550k";
+const STORY_FALLBACK_MP4_BUFSIZE =
+  process.env.STORY_FALLBACK_MP4_BUFSIZE || "1100k";
+const STORY_FALLBACK_MP4_AUDIO_BITRATE =
+  process.env.STORY_FALLBACK_MP4_AUDIO_BITRATE || "40k";
 const STORY_HLS_X264_PRESET = process.env.STORY_HLS_X264_PRESET || "superfast";
 const STORY_HLS_SEGMENT_SECONDS = Math.max(
   2,
@@ -368,7 +377,10 @@ async function processVideo(inputBuffer, params) {
     params,
     probeInfo,
   );
-  const isStoryDelivery = params.deliveryProfile === "story";
+  const isStoryDelivery =
+    params.deliveryProfile === "story" ||
+    params.deliveryProfile === "story-fallback";
+  const isStoryFallbackDelivery = params.deliveryProfile === "story-fallback";
   const outPath = tmpPath(ext);
   const crf = resolveCrf(params, vcodec);
 
@@ -420,8 +432,16 @@ async function processVideo(inputBuffer, params) {
 
   // Codec-specific tuning for fast decode / smooth playback
   if (vcodec === "libx264") {
-    const maxRate = isStoryDelivery ? "1400k" : "2500k";
-    const bufSize = isStoryDelivery ? "2800k" : "5000k";
+    const maxRate = isStoryDelivery
+      ? isStoryFallbackDelivery
+        ? STORY_FALLBACK_MP4_MAXRATE
+        : STORY_MP4_MAXRATE
+      : "2500k";
+    const bufSize = isStoryDelivery
+      ? isStoryFallbackDelivery
+        ? STORY_FALLBACK_MP4_BUFSIZE
+        : STORY_MP4_BUFSIZE
+      : "5000k";
     const profile = isStoryDelivery ? "main" : "high";
     const level = isStoryDelivery ? "3.1" : "4.1";
     args.push(
@@ -495,7 +515,14 @@ async function processVideo(inputBuffer, params) {
   if (hasAudio) {
     args.push("-c:a", acodec);
     if (acodec === "aac") {
-      args.push("-b:a", isStoryDelivery ? "64k" : "96k");
+      args.push(
+        "-b:a",
+        isStoryDelivery
+          ? isStoryFallbackDelivery
+            ? STORY_FALLBACK_MP4_AUDIO_BITRATE
+            : STORY_MP4_AUDIO_BITRATE
+          : "96k",
+      );
     } else if (acodec === "libopus") {
       args.push("-b:a", "64k");
     }

@@ -34,13 +34,36 @@ async function getObjectStream(key) {
   return response;
 }
 
-async function getObjectBuffer(key) {
-  const response = await getObjectStream(key);
+async function getObjectBuffer(key, opts = {}) {
+  const command = new GetObjectCommand({
+    Bucket: BUCKET,
+    Key: key,
+    ...(opts.range ? { Range: opts.range } : {}),
+  });
+  const response = await s3.send(command);
   const chunks = [];
   for await (const chunk of response.Body) {
     chunks.push(chunk);
   }
-  return { buffer: Buffer.concat(chunks), contentType: response.ContentType };
+  return {
+    buffer: Buffer.concat(chunks),
+    contentType: response.ContentType,
+    contentLength: response.ContentLength,
+    contentRange: response.ContentRange,
+    etag: response.ETag,
+  };
+}
+
+async function getObjectMetadata(key) {
+  const response = await s3.send(
+    new HeadObjectCommand({ Bucket: BUCKET, Key: key }),
+  );
+
+  return {
+    contentLength: response.ContentLength,
+    contentType: response.ContentType,
+    etag: response.ETag,
+  };
 }
 
 async function putObject(key, buffer, contentType) {
@@ -70,6 +93,7 @@ module.exports = {
   BUCKET,
   getObjectStream,
   getObjectBuffer,
+  getObjectMetadata,
   putObject,
   objectExists,
 };

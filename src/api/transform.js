@@ -12,6 +12,7 @@ const { getObjectBuffer } = require("../storage/s3Client");
 const {
   checkCache,
   getFromCache,
+  getCacheMetadata,
   saveToCache,
 } = require("../services/cacheService");
 const { acquireLock, releaseLock } = require("../services/lockService");
@@ -30,6 +31,8 @@ const {
 } = require("../services/videoPreprocessor");
 const {
   storyVideoCacheKey,
+  storyFallbackVideoCacheKey,
+  storyFallbackVideoParams,
   storyVideoParams,
 } = require("../services/storyVideoService");
 
@@ -43,6 +46,85 @@ function setMediaCacheHeaders(reply) {
 
 function setVideoDeliveryHeaders(reply) {
   reply.header("Accept-Ranges", "bytes");
+}
+
+function parseSingleRangeHeader(rangeHeader, totalLength) {
+  if (!rangeHeader) return { kind: "none" };
+  if (typeof rangeHeader !== "string") return { kind: "invalid" };
+
+  const normalized = rangeHeader.trim().toLowerCase();
+  if (!normalized.startsWith("bytes=")) return { kind: "invalid" };
+
+  const rawValue = normalized.slice("bytes=".length);
+  if (!rawValue || rawValue.includes(",")) return { kind: "invalid" };
+
+  const [startRaw, endRaw] = rawValue.split("-");
+  if (startRaw === undefined || endRaw === undefined) {
+    return { kind: "invalid" };
+  }
+
+  let start;
+  let end;
+
+  if (startRaw === "") {
+    const suffixLength = Number.parseInt(endRaw, 10);
+    if (!Number.isFinite(suffixLength) || suffixLength <= 0) {
+      return { kind: "invalid" };
+    }
+
+    const effectiveLength = Math.min(suffixLength, totalLength);
+    start = Math.max(totalLength - effectiveLength, 0);
+    end = totalLength - 1;
+  } else {
+    start = Number.parseInt(startRaw, 10);
+    if (!Number.isFinite(start) || start < 0 || start >= totalLength) {
+      return { kind: "unsatisfiable" };
+    }
+
+    if (endRaw === "") {
+      end = totalLength - 1;
+    } else {
+      end = Number.parseInt(endRaw, 10);
+      if (!Number.isFinite(end) || end < start) {
+        return { kind: "invalid" };
+      }
+      end = Math.min(end, totalLength - 1);
+    }
+  }
+
+  return {
+    kind: "partial",
+    start,
+    end,
+    contentLength: end - start + 1,
+    headerValue: `bytes ${start}-${end}/${totalLength}`,
+    storageRange: `bytes=${start}-${end}`,
+  };
+}
+
+function applyVideoBodyHeaders(reply, contentType, variantName, cacheStatus) {
+  reply.header("Content-Type", contentType);
+  setMediaCacheHeaders(reply);
+  setVideoDeliveryHeaders(reply);
+  reply.header("X-Video-Target", variantName);
+  reply.header("X-Cache", cacheStatus);
+}
+
+function sendVideoBuffer(
+  reply,
+  { buffer, contentType, variantName, cacheStatus, range, totalLength },
+) {
+  applyVideoBodyHeaders(reply, contentType, variantName, cacheStatus);
+
+  if (range?.kind === "partial") {
+    reply.code(206);
+    reply.header("Content-Range", range.headerValue);
+    reply.header("Content-Length", String(range.contentLength));
+    return reply.send(buffer);
+  }
+
+  reply.header("Content-Length", String(totalLength ?? buffer.length));
+  return reply.send(buffer);
 }
 
 /**
@@ -97,10 +179,36 @@ function resolveVideoTarget(request) {
 }
 
 /** Wait for another worker to finish, then serve from cache or 503. */
-async function serveFromCacheOrWait(derivedKey, reply) {
+async function serveFromCacheOrWait(derivedKey, reply, opts = {}) {
   await new Promise((resolve) => setTimeout(resolve, 2000));
   const hit = await checkCache(derivedKey);
   if (hit) {
+    if (opts.video === true) {
+      const metadata = await getCacheMetadata(derivedKey);
+      const totalLength = Number(metadata.contentLength || 0);
+      const range = parseSingleRangeHeader(opts.rangeHeader, totalLength);
+
+      if (range.kind === "invalid" || range.kind === "unsatisfiable") {
+        reply.code(416);
+        setVideoDeliveryHeaders(reply);
+        reply.header("Content-Range", `bytes */${totalLength}`);
+        return reply.send({ error: "Requested range not satisfiable" });
+      }
+
+      const { buffer, contentType } = await getFromCache(derivedKey, {
+        range: range.kind === "partial" ? range.storageRange : undefined,
+      });
+
+      return sendVideoBuffer(reply, {
+        buffer,
+        contentType,
+        variantName: opts.variantName,
+        cacheStatus: "HIT",
+        range,
+        totalLength,
+      });
+    }
+
     const { buffer, contentType } = await getFromCache(derivedKey);
     reply.header("Content-Type", contentType);
     setMediaCacheHeaders(reply);
@@ -287,18 +395,53 @@ async function transformRoutes(fastify) {
       variantParams = previewParams();
       derivedKey = generateDerivedKey(originalKey, variantParams);
       variantName = "preview";
-    } else if (target === "story" || target === "story-fallback") {
+    } else if (target === "story") {
       variantParams = storyVideoParams();
       derivedKey = storyVideoCacheKey(originalKey);
       variantName = "story";
+    } else if (target === "story-fallback") {
+      variantParams = storyFallbackVideoParams();
+      derivedKey = storyFallbackVideoCacheKey(originalKey);
+      variantName = "story-fallback";
     } else {
       variantParams = fullParams();
       derivedKey = generateDerivedKey(originalKey, variantParams);
       variantName = "full";
     }
 
+    const allowsRange = variantName !== "snapshot" && variantName !== "webp";
+
     // ── 1. Cache hit (fast path) ────────────────────────────────────────
     if (await checkCache(derivedKey)) {
+      if (allowsRange) {
+        const metadata = await getCacheMetadata(derivedKey);
+        const totalLength = Number(metadata.contentLength || 0);
+        const range = parseSingleRangeHeader(
+          request.headers.range,
+          totalLength,
+        );
+
+        if (range.kind === "invalid" || range.kind === "unsatisfiable") {
+          reply.code(416);
+          setVideoDeliveryHeaders(reply);
+          reply.header("Content-Range", `bytes */${totalLength}`);
+          return reply.send({ error: "Requested range not satisfiable" });
+        }
+
+        const { buffer, contentType } = await getFromCache(derivedKey, {
+          range: range.kind === "partial" ? range.storageRange : undefined,
+        });
+
+        return sendVideoBuffer(reply, {
+          buffer,
+          contentType,
+          variantName,
+          cacheStatus: "HIT",
+          range,
+          totalLength,
+        });
+      }
+
       const { buffer, contentType } = await getFromCache(derivedKey);
       reply.header("Content-Type", contentType);
       setMediaCacheHeaders(reply);
@@ -310,11 +453,46 @@ async function transformRoutes(fastify) {
 
     // ── 2. Acquire lock — prevent duplicate processing ──────────────────
     const locked = await acquireLock(derivedKey);
-    if (!locked) return serveFromCacheOrWait(derivedKey, reply);
+    if (!locked) {
+      return serveFromCacheOrWait(derivedKey, reply, {
+        video: true,
+        rangeHeader: allowsRange ? request.headers.range : undefined,
+        variantName,
+      });
+    }
 
     try {
       // Double-check after acquiring lock (another worker may have just finished)
       if (await checkCache(derivedKey)) {
+        if (allowsRange) {
+          const metadata = await getCacheMetadata(derivedKey);
+          const totalLength = Number(metadata.contentLength || 0);
+          const range = parseSingleRangeHeader(
+            request.headers.range,
+            totalLength,
+          );
+
+          if (range.kind === "invalid" || range.kind === "unsatisfiable") {
+            reply.code(416);
+            setVideoDeliveryHeaders(reply);
+            reply.header("Content-Range", `bytes */${totalLength}`);
+            return reply.send({ error: "Requested range not satisfiable" });
+          }
+
+          const { buffer, contentType } = await getFromCache(derivedKey, {
+            range: range.kind === "partial" ? range.storageRange : undefined,
+          });
+
+          return sendVideoBuffer(reply, {
+            buffer,
+            contentType,
+            variantName,
+            cacheStatus: "HIT",
+            range,
+            totalLength,
+          });
+        }
+
         const { buffer, contentType } = await getFromCache(derivedKey);
         reply.header("Content-Type", contentType);
         setMediaCacheHeaders(reply);
@@ -359,6 +537,33 @@ async function transformRoutes(fastify) {
       }
 
       await saveToCache(derivedKey, buffer, contentType);
+
+      if (allowsRange) {
+        const range = parseSingleRangeHeader(
+          request.headers.range,
+          buffer.length,
+        );
+        if (range.kind === "invalid" || range.kind === "unsatisfiable") {
+          reply.code(416);
+          setVideoDeliveryHeaders(reply);
+          reply.header("Content-Range", `bytes */${buffer.length}`);
+          return reply.send({ error: "Requested range not satisfiable" });
+        }
+
+        const responseBuffer =
+          range.kind === "partial"
+            ? buffer.subarray(range.start, range.end + 1)
+            : buffer;
+
+        return sendVideoBuffer(reply, {
+          buffer: responseBuffer,
+          contentType,
+          variantName,
+          cacheStatus: "MISS",
+          range,
+          totalLength: buffer.length,
+        });
+      }
 
       reply.header("Content-Type", contentType);
       setMediaCacheHeaders(reply);
