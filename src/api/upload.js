@@ -73,6 +73,23 @@ const uploadRateLimit = {
   ),
 };
 
+const STORY_VIDEO_MAX_SIZE_BYTES = 10 * 1024 * 1024;
+
+async function validateStoryVideoConstraints(buffer, filename, mimetype) {
+  if (!isVideoFile(filename, mimetype)) {
+    return { ok: true, durationSeconds: null };
+  }
+
+  if (buffer.length > STORY_VIDEO_MAX_SIZE_BYTES) {
+    return {
+      ok: false,
+      error: "Story video size must be 10 MB or less",
+    };
+  }
+
+  return { ok: true, durationSeconds: null };
+}
+
 const maxFileSize =
   Number.parseInt(process.env.UPLOAD_MAX_FILE_SIZE_MB || "120", 10) *
   1024 *
@@ -109,6 +126,19 @@ async function uploadRoutes(fastify) {
         return reply.code(400).send({ error: "Uploaded file is empty" });
       }
 
+      let storyVideoDurationSeconds = null;
+      if (storyMode) {
+        const validation = await validateStoryVideoConstraints(
+          buffer,
+          data.filename,
+          data.mimetype,
+        );
+        if (!validation.ok) {
+          return reply.code(400).send({ error: validation.error });
+        }
+        storyVideoDurationSeconds = validation.durationSeconds;
+      }
+
       const folder = data.fields?.folder?.value || "";
 
       const item = await saveUploadedImage(
@@ -120,7 +150,9 @@ async function uploadRoutes(fastify) {
       );
 
       if (item.type === "video") {
-        item.durationSeconds = await probeDuration(buffer).catch(() => 0);
+        item.durationSeconds =
+          storyVideoDurationSeconds ??
+          (await probeDuration(buffer).catch(() => 0));
         try {
           await preprocessVideo(
             item.key,
@@ -178,6 +210,19 @@ async function uploadRoutes(fastify) {
             .send({ error: "One or more uploaded files are empty" });
         }
 
+        let storyVideoDurationSeconds = null;
+        if (storyMode) {
+          const validation = await validateStoryVideoConstraints(
+            buffer,
+            part.filename,
+            part.mimetype,
+          );
+          if (!validation.ok) {
+            return reply.code(400).send({ error: validation.error });
+          }
+          storyVideoDurationSeconds = validation.durationSeconds;
+        }
+
         const item = await saveUploadedImage(
           buffer,
           part.filename,
@@ -187,7 +232,9 @@ async function uploadRoutes(fastify) {
         );
 
         if (item.type === "video") {
-          item.durationSeconds = await probeDuration(buffer).catch(() => 0);
+          item.durationSeconds =
+            storyVideoDurationSeconds ??
+            (await probeDuration(buffer).catch(() => 0));
         }
 
         items.push(item);
