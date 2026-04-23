@@ -266,9 +266,10 @@ async function uploadRoutes(fastify) {
         }
       }
 
-      const urls = items.map((i) => i.url);
+      // Return bare public IDs with extension (e.g. /123929323.webp).
+      const urls = items.map((i) => `/${i.key.replace(/^originals\//, "")}`);
 
-      return reply.code(201).send({ urls, items });
+      return reply.code(201).send({ urls });
     },
   );
 }
