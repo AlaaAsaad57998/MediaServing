@@ -266,8 +266,8 @@ async function uploadRoutes(fastify) {
         }
       }
 
-      // Return bare public IDs with extension (e.g. /123929323.webp).
-      const urls = items.map((i) => `/${i.key.replace(/^originals\//, "")}`);
+      // Return only public ID with extension, without folder segments.
+      const urls = items.map((i) => `/${path.basename(i.key)}`);
 
       return reply.code(201).send({ urls });
     },
