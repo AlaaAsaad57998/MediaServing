@@ -49,7 +49,10 @@ async function saveUploadedImage(
     key,
     size: buffer.length,
     type: resourceType,
-    url: `/${resourceType}/upload/${relativePath}`,
+    url:
+      folder === "customers/profile"
+        ? `/${relativePath}`
+        : `/${resourceType}/upload/${relativePath}`,
   };
 
   if (isVideo) {
