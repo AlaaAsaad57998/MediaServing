@@ -271,8 +271,8 @@ async function uploadRoutes(fastify) {
 
       // Return only public ID with extension, without folder segments.
       const urls = items.map((i) => `/${path.basename(i.key)}`);
-
-      return reply.code(201).send({ urls });
+      if (urls?.length > 1) return reply.code(201).send({ urls });
+      else return reply.code(201).send({ url: urls[0] });
     },
   );
 }
