@@ -8,6 +8,7 @@ const sharp = require("sharp");
 const { authHook } = require("./middleware/auth");
 const uploadRoutes = require("./api/upload");
 const transformRoutes = require("./api/transform");
+const { randomUUID } = require("crypto");
 const { createRedisClient, initRedis } = require("./services/lockService");
 const { ValidationError } = require("./utils/paramParser");
 
@@ -53,15 +54,37 @@ function buildApp(opts = {}) {
   const app = fastify({
     logger: {
       level: process.env.LOG_LEVEL || (isProd ? "info" : "debug"),
-      base: {
-        service: "media-serving",
-        env: process.env.NODE_ENV || "development",
+      // Emit level as a string ("info", "warn" …) instead of Pino's default number.
+      messageKey: "message",
+      formatters: {
+        level: (label) => ({ level: label }),
+        bindings: (bindings) => ({
+          pid: bindings.pid,
+          hostname: bindings.hostname,
+          service: "media-serving",
+          env: process.env.NODE_ENV || "development",
+        }),
       },
+      // ISO timestamp instead of epoch milliseconds.
+      timestamp: () => `,"timestamp":"${new Date().toISOString()}"`,
       redact: {
         paths: ['req.headers["x-api-key"]', "req.headers.authorization"],
         censor: "[REDACTED]",
       },
     },
+    // Use X-Request-ID / X-Correlation-ID from upstream; generate UUID otherwise.
+    genReqId(req) {
+      return (
+        req.headers["x-request-id"] ||
+        req.headers["x-correlation-id"] ||
+        randomUUID()
+      );
+    },
+    // Bind request_id to every request child-logger automatically.
+    requestIdLogLabel: "request_id",
+    // Disable Fastify's default "incoming request" / "request completed" lines;
+    // our onRequest + onResponse hooks emit properly shaped structured logs.
+    disableRequestLogging: true,
     trustProxy: process.env.TRUST_PROXY !== "false",
     ...opts,
   });
@@ -90,8 +113,16 @@ function buildApp(opts = {}) {
           "Rate limit Redis connection failed; limits may degrade",
         );
       });
-    } catch {
-      app.log.warn("Rate limit Redis init failed; using plugin defaults");
+    } catch (err) {
+      app.log.warn(
+        {
+          service: "media-serving",
+          component: "RateLimitRedis",
+          env: process.env.NODE_ENV,
+          error_message: err?.message,
+        },
+        "Rate limit Redis init failed; using plugin defaults",
+      );
     }
   }
 
@@ -127,6 +158,47 @@ function buildApp(opts = {}) {
     1024 *
     1024;
   app.register(multipart, { limits: { fileSize: maxFileSize } });
+
+  // ── Request lifecycle logging ────────────────────────────────────────────
+  // Covers every route including /health so all traffic appears in Loki.
+
+  // Echo the correlation ID so callers can trace their requests end-to-end.
+  app.addHook("onRequest", (request, reply, done) => {
+    request._startTime = Date.now();
+    reply.header("X-Request-ID", request.id);
+    request.log.info(
+      {
+        component: "HttpServer",
+        http_method: request.method,
+        url: request.url,
+        path: request.url?.split("?")[0],
+        ip: request.ip,
+        user_agent: request.headers["user-agent"],
+      },
+      "incoming request",
+    );
+    done();
+  });
+
+  // Log every completed response — level escalates with status code.
+  app.addHook("onResponse", (request, reply, done) => {
+    const duration_ms = Date.now() - (request._startTime ?? Date.now());
+    const status_code = reply.statusCode;
+    const level =
+      status_code >= 500 ? "error" : status_code >= 400 ? "warn" : "info";
+    request.log[level](
+      {
+        component: "HttpServer",
+        http_method: request.method,
+        url: request.url,
+        path: request.url?.split("?")[0],
+        status_code,
+        duration_ms,
+      },
+      "request completed",
+    );
+    done();
+  });
 
   // Global auth hook
   app.addHook("preHandler", authHook);
