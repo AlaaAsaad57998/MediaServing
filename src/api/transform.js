@@ -247,7 +247,6 @@ async function transformRoutes(fastify) {
   // ──────────────────────────────────────────────────────────────────────
 
   async function handleRequest(request, reply) {
-    const startTime = Date.now();
     let resourceType = request.params.resourceType;
     const wildcard = request.params["*"];
 
@@ -296,25 +295,21 @@ async function transformRoutes(fastify) {
       await handleImage(reply, filePath, params, request.log);
     }
 
+    // Attach media-specific fields to the request so the global onResponse
+    // hook merges them into the single "request completed" log line.
     const cacheStatus = reply.getHeader("X-Cache");
     if (cacheStatus) {
-      request.log.info(
-        {
-          service: "media-serving",
-          component: "TransformRoute",
-          env: process.env.NODE_ENV,
-          request_id: request.id,
-          url: request.url,
-          http_method: request.method,
-          resource_type: isVideo ? "video" : "image",
-          ...(isVideo && { video_target: resolveVideoTarget(request) }),
-          duration_ms: Date.now() - startTime,
-          transformed: cacheStatus === "HIT" ? "warm" : "cold",
-          cache_status: String(cacheStatus),
-          status_code: reply.statusCode,
-        },
-        "media transform",
-      );
+      request._logExtra = {
+        component: "TransformRoute",
+        resource_type: isVideo ? "video" : "image",
+        file_path: filePath,
+        ...(isVideo && { video_target: resolveVideoTarget(request) }),
+        transformed: cacheStatus === "HIT" ? "warm" : "cold",
+        cache_status: String(cacheStatus),
+        // "yes" = processed variant was already stored in S3/cache before this request.
+        // "no"  = had to process it now (MISS), or served the raw original (BYPASS).
+        pre_processed: cacheStatus === "HIT" ? "yes" : "no",
+      };
     }
   }
 

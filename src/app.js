@@ -166,7 +166,11 @@ function buildApp(opts = {}) {
   app.addHook("onRequest", (request, reply, done) => {
     request._startTime = Date.now();
     reply.header("X-Request-ID", request.id);
-    request.log.info(
+    // Health check polling (Docker probe every 30s) is logged at debug to avoid
+    // flooding Loki with noise that carries zero diagnostic value in production.
+    const isHealthCheck = request.url === "/health";
+    const incomingLevel = isHealthCheck ? "debug" : "info";
+    request.log[incomingLevel](
       {
         component: "HttpServer",
         http_method: request.method,
@@ -181,6 +185,9 @@ function buildApp(opts = {}) {
   });
 
   // Log every completed response — level escalates with status code.
+  // Route handlers may attach extra structured fields via request._logExtra = {…}
+  // (e.g. transformed, cache_status, resource_type) which are merged in here,
+  // keeping exactly one log line per request.
   app.addHook("onResponse", (request, reply, done) => {
     const duration_ms = Date.now() - (request._startTime ?? Date.now());
     const status_code = reply.statusCode;
@@ -192,8 +199,11 @@ function buildApp(opts = {}) {
         http_method: request.method,
         url: request.url,
         path: request.url?.split("?")[0],
+        ip: request.ip,
         status_code,
         duration_ms,
+        // Spread any route-specific fields (transform, upload, etc.)
+        ...request._logExtra,
       },
       "request completed",
     );
