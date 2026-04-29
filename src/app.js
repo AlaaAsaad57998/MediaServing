@@ -49,8 +49,19 @@ function parseCorsOrigin(value) {
 }
 
 function buildApp(opts = {}) {
+  const isProd = process.env.NODE_ENV === "production";
   const app = fastify({
-    logger: true,
+    logger: {
+      level: process.env.LOG_LEVEL || (isProd ? "info" : "debug"),
+      base: {
+        service: "media-serving",
+        env: process.env.NODE_ENV || "development",
+      },
+      redact: {
+        paths: ['req.headers["x-api-key"]', "req.headers.authorization"],
+        censor: "[REDACTED]",
+      },
+    },
     trustProxy: process.env.TRUST_PROXY !== "false",
     ...opts,
   });
@@ -60,10 +71,24 @@ function buildApp(opts = {}) {
     try {
       rateLimitRedis = createRedisClient();
       rateLimitRedis.on("error", () => {
-        app.log.warn("Rate limit Redis unavailable; limits may degrade");
+        app.log.warn(
+          {
+            service: "media-serving",
+            component: "RateLimitRedis",
+            env: process.env.NODE_ENV,
+          },
+          "Rate limit Redis unavailable; limits may degrade",
+        );
       });
       rateLimitRedis.connect().catch(() => {
-        app.log.warn("Rate limit Redis connection failed; limits may degrade");
+        app.log.warn(
+          {
+            service: "media-serving",
+            component: "RateLimitRedis",
+            env: process.env.NODE_ENV,
+          },
+          "Rate limit Redis connection failed; limits may degrade",
+        );
       });
     } catch {
       app.log.warn("Rate limit Redis init failed; using plugin defaults");
@@ -175,7 +200,20 @@ function buildApp(opts = {}) {
       return reply.code(413).send({ error: "File too large" });
     }
 
-    request.log.error(error);
+    request.log.error(
+      {
+        service: "media-serving",
+        component: "ErrorHandler",
+        env: process.env.NODE_ENV,
+        request_id: request.id,
+        url: request.url,
+        http_method: request.method,
+        status_code: 500,
+        exception: error.constructor?.name || "Error",
+        error_message: error.message,
+      },
+      "Unhandled request error",
+    );
     reply.code(500).send({ error: "Internal server error" });
   });
 

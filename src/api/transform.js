@@ -215,6 +215,15 @@ async function serveFromCacheOrWait(derivedKey, reply, opts = {}) {
     reply.header("X-Cache", "HIT");
     return reply.send(buffer);
   }
+  opts.log?.warn(
+    {
+      service: "media-serving",
+      component: "TransformRoute",
+      env: process.env.NODE_ENV,
+      derived_key: derivedKey,
+    },
+    "Lock wait timeout — processing still in progress, returning 503",
+  );
   return reply
     .code(503)
     .send({ error: "Processing in progress, try again shortly" });
@@ -238,6 +247,7 @@ async function transformRoutes(fastify) {
   // ──────────────────────────────────────────────────────────────────────
 
   async function handleRequest(request, reply) {
+    const startTime = Date.now();
     let resourceType = request.params.resourceType;
     const wildcard = request.params["*"];
 
@@ -281,9 +291,31 @@ async function transformRoutes(fastify) {
 
     if (isVideo) {
       // VIDEO: ignore all URL transform params, only use ?target= query param
-      return handleVideo(request, reply, filePath);
+      await handleVideo(request, reply, filePath);
+    } else {
+      await handleImage(reply, filePath, params, request.log);
     }
-    return handleImage(reply, filePath, params);
+
+    const cacheStatus = reply.getHeader("X-Cache");
+    if (cacheStatus) {
+      request.log.info(
+        {
+          service: "media-serving",
+          component: "TransformRoute",
+          env: process.env.NODE_ENV,
+          request_id: request.id,
+          url: request.url,
+          http_method: request.method,
+          resource_type: isVideo ? "video" : "image",
+          ...(isVideo && { video_target: resolveVideoTarget(request) }),
+          duration_ms: Date.now() - startTime,
+          transformed: cacheStatus === "HIT" ? "warm" : "cold",
+          cache_status: String(cacheStatus),
+          status_code: reply.statusCode,
+        },
+        "media transform",
+      );
+    }
   }
 
   // ──────────────────────────────────────────────────────────────────────
@@ -291,7 +323,7 @@ async function transformRoutes(fastify) {
   //          except explicit SVG passthrough requests (f_svg).
   // ──────────────────────────────────────────────────────────────────────
 
-  async function handleImage(reply, filePath, params) {
+  async function handleImage(reply, filePath, params, log) {
     const isSvgFile = path.extname(filePath).toLowerCase() === ".svg";
 
     // Explicit SVG output should return the original source untouched.
@@ -323,7 +355,7 @@ async function transformRoutes(fastify) {
     }
 
     const locked = await acquireLock(derivedKey);
-    if (!locked) return serveFromCacheOrWait(derivedKey, reply);
+    if (!locked) return serveFromCacheOrWait(derivedKey, reply, { log });
 
     try {
       if (await checkCache(derivedKey)) {
@@ -341,6 +373,17 @@ async function transformRoutes(fastify) {
         if (err.name === "NoSuchKey" || err.$metadata?.httpStatusCode === 404) {
           return reply.code(404).send({ error: "Original file not found" });
         }
+        log?.error(
+          {
+            service: "media-serving",
+            component: "TransformRoute",
+            env: process.env.NODE_ENV,
+            file_path: filePath,
+            exception: err.constructor?.name || "Error",
+            error_message: err.message,
+          },
+          "Failed to fetch original from S3",
+        );
         throw err;
       }
 
@@ -458,6 +501,7 @@ async function transformRoutes(fastify) {
         video: true,
         rangeHeader: allowsRange ? request.headers.range : undefined,
         variantName,
+        log: request.log,
       });
     }
 
@@ -511,6 +555,19 @@ async function transformRoutes(fastify) {
         if (err.name === "NoSuchKey" || err.$metadata?.httpStatusCode === 404) {
           return reply.code(404).send({ error: "Original file not found" });
         }
+        request.log.error(
+          {
+            service: "media-serving",
+            component: "TransformRoute",
+            env: process.env.NODE_ENV,
+            request_id: request.id,
+            file_path: filePath,
+            video_target: variantName,
+            exception: err.constructor?.name || "Error",
+            error_message: err.message,
+          },
+          "Failed to fetch video original from S3",
+        );
         throw err;
       }
 

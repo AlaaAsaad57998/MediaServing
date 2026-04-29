@@ -1,3 +1,12 @@
+# Prerequisites: install the Loki Docker logging driver on the host before deploying.
+#   docker plugin install grafana/loki-docker-driver:latest --alias loki --grant-all-permissions
+# Grafana UI is available at http://localhost:3200 — add Loki as data source (http://loki:3100).
+
+x-loki-options: &loki-options
+  loki-url: "http://127.0.0.1:3100/loki/api/v1/push"
+  max-size: "10m"
+  max-file: "3"
+
 services:
   app:
     build:
@@ -25,9 +34,15 @@ services:
       FFMPEG_THREADS: "2"
       FFMPEG_VP9_DEADLINE: realtime
       FFMPEG_VP9_CPU_USED: "6"
+    logging:
+      driver: loki
+      options:
+        <<: *loki-options
+        loki-external-labels: "container_name={{.Name}},env=development,stack=media-serving,role=api"
     depends_on:
       - minio
       - redis
+      - loki
     volumes:
       - ./src:/app/src
       - ./test.html:/app/test.html:ro
@@ -70,6 +85,39 @@ services:
     pids_limit: 50
     restart: unless-stopped
 
+  loki:
+    image: grafana/loki:2.9.0
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki-data:/loki
+    mem_reservation: 64m
+    mem_limit: 256m
+    cpus: "0.25"
+    pids_limit: 50
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.2.2
+    ports:
+      - "3200:3000"
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Admin"
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      - grafana-data:/var/lib/grafana
+    mem_reservation: 64m
+    mem_limit: 256m
+    cpus: "0.25"
+    pids_limit: 50
+    depends_on:
+      - loki
+    restart: unless-stopped
+
 volumes:
   minio-data:
   redis-data:
+  loki-data:
+  grafana-data:

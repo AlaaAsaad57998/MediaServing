@@ -1,4 +1,11 @@
 # Production deployment
+# Prerequisites: install the Loki Docker logging driver on the host before deploying.
+#   docker plugin install grafana/loki-docker-driver:latest --alias loki --grant-all-permissions
+
+x-loki-options: &loki-options
+  loki-url: "${LOKI_URL:-http://127.0.0.1:3100/loki/api/v1/push}"
+  max-size: "10m"
+  max-file: "3"
 
 services:
   app:
@@ -7,10 +14,12 @@ services:
       dockerfile: Dockerfile
     image: media-serving:latest
     restart: unless-stopped
+    stop_grace_period: 30s
 
     env_file: .env.production
 
     environment:
+      NODE_ENV: production
       NODE_OPTIONS: --max-old-space-size=2048
       VIDEO_PREPROCESS_CONCURRENCY: "4"
       STORY_HLS_TRANSCODE_CONCURRENCY: "3"
@@ -23,6 +32,12 @@ services:
       FFMPEG_THREADS: "2"
       FFMPEG_VP9_DEADLINE: realtime
       FFMPEG_VP9_CPU_USED: "6"
+
+    logging:
+      driver: loki
+      options:
+        <<: *loki-options
+        loki-external-labels: "container_name={{.Name}},env=production,stack=media-serving,role=api"
 
     # ADMIN: ensure port 4001 is open in the firewall / security-group rules.
     ports:

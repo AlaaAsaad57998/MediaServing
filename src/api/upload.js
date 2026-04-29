@@ -112,6 +112,7 @@ async function uploadRoutes(fastify) {
       },
     },
     async (request, reply) => {
+      const startTime = Date.now();
       const storyMode = isTrueLike(request.query?.story);
       const data = await request.file();
 
@@ -165,13 +166,38 @@ async function uploadRoutes(fastify) {
           );
         } catch (err) {
           request.log.error(
-            { error: err.message },
+            {
+              service: "media-serving",
+              component: "UploadRoute",
+              env: process.env.NODE_ENV,
+              request_id: request.id,
+              url: request.url,
+              s3_key: item.key,
+              exception: err.constructor?.name || "Error",
+              error_message: err.message,
+            },
             "Video preprocessing failed",
           );
           return reply.code(500).send({ error: "Video processing failed" });
         }
       }
 
+      request.log.info(
+        {
+          service: "media-serving",
+          component: "UploadRoute",
+          env: process.env.NODE_ENV,
+          request_id: request.id,
+          url: request.url,
+          http_method: request.method,
+          resource_type: item.type,
+          s3_key: item.key,
+          file_size_bytes: buffer.length,
+          duration_ms: Date.now() - startTime,
+          status_code: 201,
+        },
+        "file upload",
+      );
       return reply.code(201).send(item);
     },
   );
@@ -184,6 +210,7 @@ async function uploadRoutes(fastify) {
       },
     },
     async (request, reply) => {
+      const startTime = Date.now();
       const storyMode = isTrueLike(request.query?.story);
       let folder = "";
       const items = [];
@@ -262,7 +289,15 @@ async function uploadRoutes(fastify) {
         const failed = results.find((r) => r.status === "rejected");
         if (failed) {
           request.log.error(
-            { error: failed.reason?.message },
+            {
+              service: "media-serving",
+              component: "UploadRoute",
+              env: process.env.NODE_ENV,
+              request_id: request.id,
+              url: request.url,
+              exception: failed.reason?.constructor?.name || "Error",
+              error_message: failed.reason?.message,
+            },
             "Video preprocessing failed during bulk upload",
           );
           return reply.code(500).send({ error: "Video processing failed" });
@@ -271,6 +306,22 @@ async function uploadRoutes(fastify) {
 
       // Return only public ID with extension, without folder segments.
       const urls = items.map((i) => `/${path.basename(i.key)}`);
+      const totalFileSize = items.reduce((sum, i) => sum + (i.size || 0), 0);
+      request.log.info(
+        {
+          service: "media-serving",
+          component: "UploadRoute",
+          env: process.env.NODE_ENV,
+          request_id: request.id,
+          url: request.url,
+          http_method: request.method,
+          file_count: items.length,
+          total_file_size_bytes: totalFileSize,
+          duration_ms: Date.now() - startTime,
+          status_code: 201,
+        },
+        "bulk file upload",
+      );
       if (urls?.length > 1) return reply.code(201).send({ urls });
       else return reply.code(201).send({ url: urls[0] });
     },

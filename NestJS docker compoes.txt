@@ -1,0 +1,74 @@
+name: trydos-chat-nest-js
+
+x-loki-options: &loki-options
+  loki-url: "http://127.0.0.1:3100/loki/api/v1/push"
+  max-size: "10m"
+  max-file: "3"
+
+x-app-runtime: &app-runtime
+  image: trydos-chat-nest-js:staging
+  build:
+    context: .
+    dockerfile: Dockerfile
+    target: runner
+  env_file:
+    - .env
+  restart: unless-stopped
+  stop_grace_period: 30s
+
+services:
+  chat-app:
+    <<: *app-runtime
+    command: [ "node", "dist/main.js" ]
+    logging:
+      driver: loki
+      options:
+        <<: *loki-options
+        loki-external-labels: "container_name={{.Name}},env=staging,stack=trydos-chat-nest-js,role=api"
+    environment:
+      APP_RUNTIME: api
+      ENABLE_CALL_CLEANUP_CRON: "false"
+      NODE_ENV: production
+      PORT: "3005"
+      TYPEORM_MIGRATIONS_RUN: "false"
+    ports:
+      - "127.0.0.1:3005:3005"
+    volumes:
+      - ./storage:/usr/src/app/storage
+    healthcheck:
+      test: [ "CMD-SHELL", "node -e \"const http=require('http'); const req=http.get('http://127.0.0.1:3005/health', r=>process.exit(r.statusCode>=200&&r.statusCode<400?0:1)); req.on('error',()=>process.exit(1)); req.setTimeout(4000,()=>{req.destroy();process.exit(1);});\"" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    mem_reservation: 512m
+    mem_limit: 1g
+    cpus: "1.50"
+    pids_limit: 200
+
+  chat-cron:
+    <<: *app-runtime
+    command: [ "node", "dist/cron.js" ]
+    logging:
+      driver: loki
+      options:
+        <<: *loki-options
+        loki-external-labels: "container_name={{.Name}},env=staging,stack=trydos-chat-nest-js,role=cron"
+    environment:
+      APP_RUNTIME: cron
+      ENABLE_CALL_CLEANUP_CRON: "true"
+      NODE_ENV: production
+      PORT: "3005"
+      TYPEORM_MIGRATIONS_RUN: "false"
+    volumes:
+      - ./storage:/usr/src/app/storage
+    healthcheck:
+      test: [ "CMD-SHELL", "node -e \"const fs=require('fs'); const cmd=fs.readFileSync('/proc/1/cmdline','utf8').replace(/\\0/g,' '); process.exit(cmd.includes('dist/cron.js')?0:1);\"" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    mem_reservation: 128m
+    mem_limit: 256m
+    cpus: "0.50"
+    pids_limit: 100
