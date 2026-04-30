@@ -229,6 +229,21 @@ async function serveFromCacheOrWait(derivedKey, reply, opts = {}) {
     .send({ error: "Processing in progress, try again shortly" });
 }
 
+function stampLogExtra(
+  request,
+  { isVideo, filePath, cacheStatus, videoTarget },
+) {
+  request._logExtra = {
+    component: "TransformRoute",
+    resource_type: isVideo ? "video" : "image",
+    file_path: filePath,
+    ...(isVideo && videoTarget != null && { video_target: videoTarget }),
+    transformed: cacheStatus === "HIT" ? "warm" : "cold",
+    cache_status: String(cacheStatus),
+    pre_processed: cacheStatus === "HIT" ? "yes" : "no",
+  };
+}
+
 async function transformRoutes(fastify) {
   const routeConfig = {
     config: {
@@ -292,24 +307,7 @@ async function transformRoutes(fastify) {
       // VIDEO: ignore all URL transform params, only use ?target= query param
       await handleVideo(request, reply, filePath);
     } else {
-      await handleImage(reply, filePath, params, request.log);
-    }
-
-    // Attach media-specific fields to the request so the global onResponse
-    // hook merges them into the single "request completed" log line.
-    const cacheStatus = reply.getHeader("X-Cache");
-    if (cacheStatus) {
-      request._logExtra = {
-        component: "TransformRoute",
-        resource_type: isVideo ? "video" : "image",
-        file_path: filePath,
-        ...(isVideo && { video_target: resolveVideoTarget(request) }),
-        transformed: cacheStatus === "HIT" ? "warm" : "cold",
-        cache_status: String(cacheStatus),
-        // "yes" = processed variant was already stored in S3/cache before this request.
-        // "no"  = had to process it now (MISS), or served the raw original (BYPASS).
-        pre_processed: cacheStatus === "HIT" ? "yes" : "no",
-      };
+      await handleImage(request, reply, filePath, params, request.log);
     }
   }
 
@@ -318,12 +316,12 @@ async function transformRoutes(fastify) {
   //          except explicit SVG passthrough requests (f_svg).
   // ──────────────────────────────────────────────────────────────────────
 
-  async function handleImage(reply, filePath, params, log) {
+  async function handleImage(request, reply, filePath, params, log) {
     const isSvgFile = path.extname(filePath).toLowerCase() === ".svg";
 
     // Explicit SVG output should return the original source untouched.
     if (params.f === "svg" && isSvgFile) {
-      return sendOriginal(filePath, reply);
+      return sendOriginal(request, filePath, reply);
     }
 
     // Always output webp regardless of f_ param
@@ -335,7 +333,7 @@ async function transformRoutes(fastify) {
     }
 
     if (Object.keys(params).length === 0) {
-      return sendOriginal(filePath, reply);
+      return sendOriginal(request, filePath, reply);
     }
 
     const originalKey = `originals/${filePath}`;
@@ -346,6 +344,7 @@ async function transformRoutes(fastify) {
       reply.header("Content-Type", contentType);
       setMediaCacheHeaders(reply);
       reply.header("X-Cache", "HIT");
+      stampLogExtra(request, { isVideo: false, filePath, cacheStatus: "HIT" });
       return reply.send(buffer);
     }
 
@@ -358,6 +357,11 @@ async function transformRoutes(fastify) {
         reply.header("Content-Type", contentType);
         setMediaCacheHeaders(reply);
         reply.header("X-Cache", "HIT");
+        stampLogExtra(request, {
+          isVideo: false,
+          filePath,
+          cacheStatus: "HIT",
+        });
         return reply.send(buffer);
       }
 
@@ -391,6 +395,7 @@ async function transformRoutes(fastify) {
       reply.header("Content-Type", contentType);
       setMediaCacheHeaders(reply);
       reply.header("X-Cache", "MISS");
+      stampLogExtra(request, { isVideo: false, filePath, cacheStatus: "MISS" });
       return reply.send(buffer);
     } finally {
       await releaseLock(derivedKey);
@@ -470,6 +475,12 @@ async function transformRoutes(fastify) {
           range: range.kind === "partial" ? range.storageRange : undefined,
         });
 
+        stampLogExtra(request, {
+          isVideo: true,
+          filePath,
+          cacheStatus: "HIT",
+          videoTarget: variantName,
+        });
         return sendVideoBuffer(reply, {
           buffer,
           contentType,
@@ -486,6 +497,12 @@ async function transformRoutes(fastify) {
       setVideoDeliveryHeaders(reply);
       reply.header("X-Video-Target", variantName);
       reply.header("X-Cache", "HIT");
+      stampLogExtra(request, {
+        isVideo: true,
+        filePath,
+        cacheStatus: "HIT",
+        videoTarget: variantName,
+      });
       return reply.send(buffer);
     }
 
@@ -522,6 +539,12 @@ async function transformRoutes(fastify) {
             range: range.kind === "partial" ? range.storageRange : undefined,
           });
 
+          stampLogExtra(request, {
+            isVideo: true,
+            filePath,
+            cacheStatus: "HIT",
+            videoTarget: variantName,
+          });
           return sendVideoBuffer(reply, {
             buffer,
             contentType,
@@ -538,6 +561,12 @@ async function transformRoutes(fastify) {
         setVideoDeliveryHeaders(reply);
         reply.header("X-Video-Target", variantName);
         reply.header("X-Cache", "HIT");
+        stampLogExtra(request, {
+          isVideo: true,
+          filePath,
+          cacheStatus: "HIT",
+          videoTarget: variantName,
+        });
         return reply.send(buffer);
       }
 
@@ -607,6 +636,12 @@ async function transformRoutes(fastify) {
             ? buffer.subarray(range.start, range.end + 1)
             : buffer;
 
+        stampLogExtra(request, {
+          isVideo: true,
+          filePath,
+          cacheStatus: "MISS",
+          videoTarget: variantName,
+        });
         return sendVideoBuffer(reply, {
           buffer: responseBuffer,
           contentType,
@@ -622,6 +657,12 @@ async function transformRoutes(fastify) {
       setVideoDeliveryHeaders(reply);
       reply.header("X-Video-Target", variantName);
       reply.header("X-Cache", "MISS");
+      stampLogExtra(request, {
+        isVideo: true,
+        filePath,
+        cacheStatus: "MISS",
+        videoTarget: variantName,
+      });
       return reply.send(buffer);
     } finally {
       await releaseLock(derivedKey);
@@ -632,13 +673,18 @@ async function transformRoutes(fastify) {
   //  Serve original (no transformations)
   // ──────────────────────────────────────────────────────────────────────
 
-  async function sendOriginal(filePath, reply) {
+  async function sendOriginal(request, filePath, reply) {
     const originalKey = `originals/${filePath}`;
     try {
       const { buffer, contentType } = await getObjectBuffer(originalKey);
       reply.header("Content-Type", contentType || "application/octet-stream");
       setMediaCacheHeaders(reply);
       reply.header("X-Cache", "BYPASS");
+      stampLogExtra(request, {
+        isVideo: false,
+        filePath,
+        cacheStatus: "BYPASS",
+      });
       return reply.send(buffer);
     } catch (err) {
       if (err.name === "NoSuchKey" || err.$metadata?.httpStatusCode === 404) {
