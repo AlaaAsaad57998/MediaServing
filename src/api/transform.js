@@ -178,7 +178,10 @@ function resolveVideoTarget(request) {
     .toLowerCase();
 }
 
-/** Wait for another worker to finish, then serve from cache or 503. */
+/** Wait for another worker to finish, then serve from cache or 503.
+ * opts.request  — the Fastify request object (for stampLogExtra)
+ * opts.filePath — the resolved file path (for stampLogExtra)
+ */
 async function serveFromCacheOrWait(derivedKey, reply, opts = {}) {
   await new Promise((resolve) => setTimeout(resolve, 2000));
   const hit = await checkCache(derivedKey);
@@ -189,6 +192,12 @@ async function serveFromCacheOrWait(derivedKey, reply, opts = {}) {
       const range = parseSingleRangeHeader(opts.rangeHeader, totalLength);
 
       if (range.kind === "invalid" || range.kind === "unsatisfiable") {
+        stampLogExtra(opts.request, {
+          isVideo: true,
+          filePath: opts.filePath,
+          cacheStatus: "HIT",
+          videoTarget: opts.variantName,
+        });
         reply.code(416);
         setVideoDeliveryHeaders(reply);
         reply.header("Content-Range", `bytes */${totalLength}`);
@@ -199,6 +208,12 @@ async function serveFromCacheOrWait(derivedKey, reply, opts = {}) {
         range: range.kind === "partial" ? range.storageRange : undefined,
       });
 
+      stampLogExtra(opts.request, {
+        isVideo: true,
+        filePath: opts.filePath,
+        cacheStatus: "HIT",
+        videoTarget: opts.variantName,
+      });
       return sendVideoBuffer(reply, {
         buffer,
         contentType,
@@ -213,6 +228,11 @@ async function serveFromCacheOrWait(derivedKey, reply, opts = {}) {
     reply.header("Content-Type", contentType);
     setMediaCacheHeaders(reply);
     reply.header("X-Cache", "HIT");
+    stampLogExtra(opts.request, {
+      isVideo: false,
+      filePath: opts.filePath,
+      cacheStatus: "HIT",
+    });
     return reply.send(buffer);
   }
   opts.log?.warn(
@@ -224,6 +244,12 @@ async function serveFromCacheOrWait(derivedKey, reply, opts = {}) {
     },
     "Lock wait timeout — processing still in progress, returning 503",
   );
+  stampLogExtra(opts.request, {
+    isVideo: opts.video === true,
+    filePath: opts.filePath,
+    cacheStatus: "PROCESSING",
+    ...(opts.variantName != null && { videoTarget: opts.variantName }),
+  });
   return reply
     .code(503)
     .send({ error: "Processing in progress, try again shortly" });
@@ -349,7 +375,12 @@ async function transformRoutes(fastify) {
     }
 
     const locked = await acquireLock(derivedKey);
-    if (!locked) return serveFromCacheOrWait(derivedKey, reply, { log });
+    if (!locked)
+      return serveFromCacheOrWait(derivedKey, reply, {
+        log,
+        request,
+        filePath,
+      });
 
     try {
       if (await checkCache(derivedKey)) {
@@ -370,6 +401,11 @@ async function transformRoutes(fastify) {
         original = await getObjectBuffer(originalKey);
       } catch (err) {
         if (err.name === "NoSuchKey" || err.$metadata?.httpStatusCode === 404) {
+          stampLogExtra(request, {
+            isVideo: false,
+            filePath,
+            cacheStatus: "MISS",
+          });
           return reply.code(404).send({ error: "Original file not found" });
         }
         log?.error(
@@ -514,6 +550,8 @@ async function transformRoutes(fastify) {
         rangeHeader: allowsRange ? request.headers.range : undefined,
         variantName,
         log: request.log,
+        request,
+        filePath,
       });
     }
 
@@ -577,6 +615,12 @@ async function transformRoutes(fastify) {
         originalBuffer = original.buffer;
       } catch (err) {
         if (err.name === "NoSuchKey" || err.$metadata?.httpStatusCode === 404) {
+          stampLogExtra(request, {
+            isVideo: true,
+            filePath,
+            cacheStatus: "MISS",
+            videoTarget: variantName,
+          });
           return reply.code(404).send({ error: "Original file not found" });
         }
         request.log.error(
@@ -688,6 +732,11 @@ async function transformRoutes(fastify) {
       return reply.send(buffer);
     } catch (err) {
       if (err.name === "NoSuchKey" || err.$metadata?.httpStatusCode === 404) {
+        stampLogExtra(request, {
+          isVideo: false,
+          filePath,
+          cacheStatus: "MISS",
+        });
         return reply.code(404).send({ error: "Original file not found" });
       }
       throw err;
