@@ -62,9 +62,7 @@ async function statsRoutes(fastify) {
       signal: AbortSignal.timeout(10_000),
     });
     if (!resp.ok) {
-      throw new Error(
-        `Grafana /api/datasources returned HTTP ${resp.status}`,
-      );
+      throw new Error(`Grafana /api/datasources returned HTTP ${resp.status}`);
     }
     const list = await resp.json();
     const loki = list.find((ds) => ds.type === "loki");
@@ -188,20 +186,25 @@ async function statsRoutes(fastify) {
       const baseLabels = `{container_name="${containerName}"}`;
       const basePipeline = `${baseLabels} | json | message="request completed" | component="TransformRoute" ${rtFilter}`;
 
+      // Warm/cold metrics count only successful responses (status < 400).
+      // Errors and warnings are intentionally excluded so they do not inflate
+      // the "cold" counter — they are tracked separately in the errors query.
+      const successPipeline = `${basePipeline} | status_code < 400`;
+
       let lokiPath;
       const queryParams = new URLSearchParams();
 
       if (type === "top_files") {
         // Aggregated count per (file_path, resource_type, transformed) over the range.
         // Instant query evaluated at `end` time; range window equals the selected duration.
-        const logStream = `(${basePipeline}${searchFilter})`;
+        const logStream = `(${successPipeline}${searchFilter})`;
         const lokiQuery = `sum by (file_path, resource_type, transformed) (count_over_time(${logStream} [${rangeStr}]))`;
         lokiPath = "/loki/api/v1/query";
         queryParams.set("query", lokiQuery);
         queryParams.set("time", endIso);
       } else if (type === "warm_cold") {
         // Aggregated count per (transformed, resource_type) for warm/cold ratio.
-        const logStream = `(${basePipeline} | transformed=~"warm|cold")`;
+        const logStream = `(${successPipeline} | transformed=~"warm|cold")`;
         const lokiQuery = `sum by (transformed, resource_type) (count_over_time(${logStream} [${rangeStr}]))`;
         lokiPath = "/loki/api/v1/query";
         queryParams.set("query", lokiQuery);
@@ -209,6 +212,7 @@ async function statsRoutes(fastify) {
       } else {
         // Raw log stream query for error/warn entries — up to 2000 entries,
         // newest first so the frontend gets the most recent occurrences.
+        // transformed is not meaningful for failed requests (treated as N/A).
         const lokiQuery = `${basePipeline} | status_code >= 400`;
         lokiPath = "/loki/api/v1/query_range";
         queryParams.set("query", lokiQuery);
@@ -234,7 +238,10 @@ async function statsRoutes(fastify) {
         );
         return reply
           .code(502)
-          .send({ error: "Failed to resolve Loki datasource", detail: err.message });
+          .send({
+            error: "Failed to resolve Loki datasource",
+            detail: err.message,
+          });
       }
 
       try {

@@ -946,6 +946,9 @@
         for (const item of vectorResult) {
           const { file_path, resource_type, transformed } = item.metric;
           if (!file_path) continue;
+          // Only count entries with an explicit warm/cold label.
+          // Any other value (e.g. N/A from failed requests) is skipped.
+          if (transformed !== "warm" && transformed !== "cold") continue;
           const count = parseInt(item.value[1], 10) || 0;
 
           let entry = map.get(file_path);
@@ -984,6 +987,8 @@
         };
         for (const item of vectorResult) {
           const { transformed, resource_type } = item.metric;
+          // Only tally explicit warm/cold entries — anything else is excluded.
+          if (transformed !== "warm" && transformed !== "cold") continue;
           const count = parseInt(item.value[1], 10) || 0;
           if (transformed === "warm") totals.warm += count;
           if (transformed === "cold") totals.cold += count;
