@@ -259,12 +259,20 @@ function stampLogExtra(
   request,
   { isVideo, filePath, cacheStatus, videoTarget },
 ) {
+  // Only HIT → "warm" and MISS → "cold" are meaningful for cache-ratio stats.
+  // BYPASS (SVG passthrough), PROCESSING (lock wait 503), and ERROR (uncaught
+  // exception) are labelled "bypass" so the Loki warm/cold queries —
+  // which filter `transformed=~"warm|cold"` — naturally exclude them,
+  // preventing inflation of either counter.
+  const transformedLabel =
+    cacheStatus === "HIT" ? "warm" : cacheStatus === "MISS" ? "cold" : "bypass";
+
   request._logExtra = {
     component: "TransformRoute",
     resource_type: isVideo ? "video" : "image",
     file_path: filePath,
     ...(isVideo && videoTarget != null && { video_target: videoTarget }),
-    transformed: cacheStatus === "HIT" ? "warm" : "cold",
+    transformed: transformedLabel,
     cache_status: String(cacheStatus),
     pre_processed: cacheStatus === "HIT" ? "yes" : "no",
   };
@@ -404,7 +412,7 @@ async function transformRoutes(fastify) {
           stampLogExtra(request, {
             isVideo: false,
             filePath,
-            cacheStatus: "MISS",
+            cacheStatus: "NOT_FOUND",
           });
           return reply.code(404).send({ error: "Original file not found" });
         }
@@ -419,6 +427,13 @@ async function transformRoutes(fastify) {
           },
           "Failed to fetch original from S3",
         );
+        // Stamp before re-throwing so the onResponse hook logs this request
+        // with component="TransformRoute" (making it visible in the errors table).
+        stampLogExtra(request, {
+          isVideo: false,
+          filePath,
+          cacheStatus: "ERROR",
+        });
         throw err;
       }
 
@@ -433,6 +448,17 @@ async function transformRoutes(fastify) {
       reply.header("X-Cache", "MISS");
       stampLogExtra(request, { isVideo: false, filePath, cacheStatus: "MISS" });
       return reply.send(buffer);
+    } catch (err) {
+      // Catch-all for processImage / saveToCache / unexpected failures.
+      // If stampLogExtra was already called (e.g. for a handled 404), keep it.
+      if (!request._logExtra) {
+        stampLogExtra(request, {
+          isVideo: false,
+          filePath,
+          cacheStatus: "ERROR",
+        });
+      }
+      throw err;
     } finally {
       await releaseLock(derivedKey);
     }
@@ -618,7 +644,7 @@ async function transformRoutes(fastify) {
           stampLogExtra(request, {
             isVideo: true,
             filePath,
-            cacheStatus: "MISS",
+            cacheStatus: "NOT_FOUND",
             videoTarget: variantName,
           });
           return reply.code(404).send({ error: "Original file not found" });
@@ -635,7 +661,14 @@ async function transformRoutes(fastify) {
             error_message: err.message,
           },
           "Failed to fetch video original from S3",
-        );
+        ); // Stamp before re-throwing so the onResponse hook logs this request
+        // with component="TransformRoute" (visible in the errors table).
+        stampLogExtra(request, {
+          isVideo: true,
+          filePath,
+          cacheStatus: "ERROR",
+          videoTarget: variantName,
+        });
         throw err;
       }
 
@@ -708,6 +741,18 @@ async function transformRoutes(fastify) {
         videoTarget: variantName,
       });
       return reply.send(buffer);
+    } catch (err) {
+      // Catch-all for processVideo / saveToCache / unexpected failures.
+      // If stampLogExtra was already called (e.g. for a handled 404), keep it.
+      if (!request._logExtra) {
+        stampLogExtra(request, {
+          isVideo: true,
+          filePath,
+          cacheStatus: "ERROR",
+          videoTarget: variantName,
+        });
+      }
+      throw err;
     } finally {
       await releaseLock(derivedKey);
     }
@@ -735,7 +780,7 @@ async function transformRoutes(fastify) {
         stampLogExtra(request, {
           isVideo: false,
           filePath,
-          cacheStatus: "MISS",
+          cacheStatus: "NOT_FOUND",
         });
         return reply.code(404).send({ error: "Original file not found" });
       }
