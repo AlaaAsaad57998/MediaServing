@@ -32,6 +32,13 @@ services:
       FFMPEG_THREADS: "2"
       FFMPEG_VP9_DEADLINE: realtime
       FFMPEG_VP9_CPU_USED: "6"
+      # Loki query URL reachable from within this container.
+      # host.docker.internal resolves to the Docker host via the extra_hosts entry below.
+      LOKI_QUERY_URL: "${LOKI_QUERY_URL:-http://host.docker.internal:3100}"
+
+    # Allow the container to reach Loki running on the Docker host (port 3100).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
     logging:
       driver: loki

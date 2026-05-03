@@ -8,6 +8,7 @@ const sharp = require("sharp");
 const { authHook } = require("./middleware/auth");
 const uploadRoutes = require("./api/upload");
 const transformRoutes = require("./api/transform");
+const statsRoutes = require("./api/stats");
 const { randomUUID } = require("crypto");
 const { createRedisClient, initRedis } = require("./services/lockService");
 const { ValidationError } = require("./utils/paramParser");
@@ -271,6 +272,7 @@ function buildApp(opts = {}) {
   // Routes
   app.register(uploadRoutes);
   app.register(transformRoutes);
+  app.register(statsRoutes);
 
   // Global error handler
   app.setErrorHandler((error, request, reply) => {

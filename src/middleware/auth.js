@@ -6,6 +6,8 @@ async function authHook(request, reply) {
     request.url === "/test.html" ||
     request.url === "/compare" ||
     request.url === "/compare.html" ||
+    request.url === "/stats" ||
+    request.url === "/stats.html" ||
     request.method === "OPTIONS" ||
     request.url.includes("/media/upload/") ||
     request.url.includes("/image/upload/") ||

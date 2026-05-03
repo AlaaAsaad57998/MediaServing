@@ -31,7 +31,7 @@ COPY package.json ./
 
 # Copy application source and static HTML pages
 COPY src ./src
-COPY test.html compare.html ./
+COPY test.html compare.html stats.html ./
 
 EXPOSE 3000
 

@@ -1,0 +1,1427 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Media Serving — Stats</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      :root {
+        --bg: #0e1117;
+        --surface: #161b27;
+        --surface2: #1e2535;
+        --border: #2a3147;
+        --text: #e1e7f5;
+        --muted: #7a8aaa;
+        --accent: #4f9cf9;
+        --warm: #34d399; /* green  – cache HIT  */
+        --cold: #f59e0b; /* amber  – cache MISS */
+        --danger: #f87171; /* red    – errors     */
+        --warn-col: #fbbf24; /* yellow – warnings   */
+        --img-color: #818cf8;
+        --vid-color: #38bdf8;
+        --radius: 8px;
+      }
+
+      html,
+      body {
+        height: 100%;
+      }
+
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          "Segoe UI",
+          system-ui,
+          -apple-system,
+          sans-serif;
+        font-size: 14px;
+        line-height: 1.5;
+      }
+
+      /* ── Layout ── */
+      .page-header {
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+        padding: 14px 24px;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+
+      .page-header h1 {
+        font-size: 18px;
+        font-weight: 700;
+        color: var(--accent);
+        white-space: nowrap;
+        letter-spacing: -0.3px;
+      }
+
+      .header-spacer {
+        flex: 1;
+      }
+
+      main {
+        padding: 20px 24px;
+        max-width: 1400px;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
+      }
+
+      /* ── Controls ── */
+      .controls {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .btn-group {
+        display: flex;
+        border-radius: var(--radius);
+        overflow: hidden;
+        border: 1px solid var(--border);
+      }
+
+      .btn-group button {
+        background: var(--surface2);
+        color: var(--muted);
+        border: none;
+        padding: 6px 13px;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 500;
+        transition:
+          background 0.15s,
+          color 0.15s;
+        border-right: 1px solid var(--border);
+      }
+
+      .btn-group button:last-child {
+        border-right: none;
+      }
+
+      .btn-group button:hover {
+        background: var(--surface);
+        color: var(--text);
+      }
+
+      .btn-group button.active {
+        background: var(--accent);
+        color: #fff;
+      }
+
+      .search-wrap {
+        position: relative;
+        flex: 1;
+        min-width: 180px;
+        max-width: 320px;
+      }
+
+      .search-wrap input {
+        width: 100%;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        color: var(--text);
+        padding: 6px 12px 6px 32px;
+        font-size: 13px;
+        outline: none;
+        transition: border-color 0.15s;
+      }
+
+      .search-wrap input:focus {
+        border-color: var(--accent);
+      }
+      .search-wrap input::placeholder {
+        color: var(--muted);
+      }
+
+      .search-icon {
+        position: absolute;
+        left: 9px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: var(--muted);
+        pointer-events: none;
+      }
+
+      button.icon-btn {
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        color: var(--muted);
+        padding: 6px 12px;
+        cursor: pointer;
+        font-size: 13px;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        transition:
+          background 0.15s,
+          color 0.15s;
+      }
+
+      button.icon-btn:hover {
+        background: var(--surface);
+        color: var(--text);
+      }
+      button.icon-btn.spinning svg {
+        animation: spin 0.8s linear infinite;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .label-tag {
+        font-size: 12px;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+
+      .sep {
+        width: 1px;
+        height: 24px;
+        background: var(--border);
+      }
+
+      /* ── Summary cards ── */
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 14px;
+      }
+
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 16px 18px;
+      }
+
+      .card-label {
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.6px;
+        color: var(--muted);
+        margin-bottom: 6px;
+      }
+
+      .card-value {
+        font-size: 28px;
+        font-weight: 700;
+        line-height: 1;
+      }
+
+      .card-sub {
+        font-size: 12px;
+        color: var(--muted);
+        margin-top: 4px;
+      }
+
+      .card-value.warm {
+        color: var(--warm);
+      }
+      .card-value.cold {
+        color: var(--cold);
+      }
+      .card-value.danger {
+        color: var(--danger);
+      }
+
+      /* ── Section panels ── */
+      .panel {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        overflow: hidden;
+      }
+
+      .panel-header {
+        padding: 14px 18px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .panel-title {
+        font-size: 14px;
+        font-weight: 600;
+        flex: 1;
+      }
+
+      .panel-count {
+        font-size: 12px;
+        color: var(--muted);
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 1px 8px;
+      }
+
+      /* ── Two-column chart layout ── */
+      .chart-row {
+        display: grid;
+        grid-template-columns: 280px 1fr;
+        gap: 24px;
+      }
+
+      @media (max-width: 800px) {
+        .chart-row {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .chart-box {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .chart-box canvas {
+        max-width: 220px;
+        max-height: 220px;
+      }
+
+      .chart-legend {
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+      }
+
+      .legend-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+
+      .legend-label {
+        flex: 1;
+        color: var(--muted);
+      }
+      .legend-value {
+        font-weight: 600;
+      }
+      .legend-pct {
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .chart-title {
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      /* ── Breakdown panel (by resource type) ── */
+      .breakdown-box {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 20px;
+      }
+
+      .breakdown-title {
+        font-size: 13px;
+        font-weight: 600;
+        margin-bottom: 14px;
+        color: var(--muted);
+      }
+
+      .breakdown-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+
+      .breakdown-type {
+        width: 56px;
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+      }
+
+      .breakdown-type.image {
+        color: var(--img-color);
+      }
+      .breakdown-type.video {
+        color: var(--vid-color);
+      }
+      .breakdown-type.total {
+        color: var(--muted);
+      }
+
+      .bar-track {
+        flex: 1;
+        height: 18px;
+        background: var(--surface2);
+        border-radius: 4px;
+        overflow: hidden;
+        display: flex;
+      }
+
+      .bar-fill {
+        height: 100%;
+        border-radius: 4px 0 0 4px;
+        transition: width 0.4s ease;
+        min-width: 0;
+      }
+
+      .bar-fill.warm {
+        background: var(--warm);
+      }
+      .bar-fill.cold {
+        background: var(--cold);
+      }
+
+      .bar-numbers {
+        font-size: 12px;
+        color: var(--muted);
+        white-space: nowrap;
+        min-width: 96px;
+        text-align: right;
+      }
+
+      /* ── Tables ── */
+      .table-wrap {
+        overflow-x: auto;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      thead th {
+        background: var(--surface2);
+        padding: 9px 14px;
+        text-align: left;
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: var(--muted);
+        border-bottom: 1px solid var(--border);
+        white-space: nowrap;
+      }
+
+      tbody tr {
+        border-bottom: 1px solid var(--border);
+        transition: background 0.1s;
+      }
+
+      tbody tr:last-child {
+        border-bottom: none;
+      }
+      tbody tr:hover {
+        background: var(--surface2);
+      }
+
+      tbody td {
+        padding: 9px 14px;
+        font-size: 13px;
+        color: var(--text);
+      }
+
+      .td-path {
+        font-family: "Consolas", "SFMono-Regular", monospace;
+        font-size: 12px;
+        color: var(--text);
+        word-break: break-all;
+        max-width: 340px;
+      }
+
+      .badge {
+        display: inline-block;
+        border-radius: 4px;
+        padding: 1px 7px;
+        font-size: 11px;
+        font-weight: 600;
+      }
+
+      .badge.image {
+        background: rgba(129, 140, 248, 0.15);
+        color: var(--img-color);
+      }
+      .badge.video {
+        background: rgba(56, 189, 248, 0.15);
+        color: var(--vid-color);
+      }
+      .badge.warn {
+        background: rgba(251, 191, 36, 0.15);
+        color: var(--warn-col);
+      }
+      .badge.error {
+        background: rgba(248, 113, 113, 0.15);
+        color: var(--danger);
+      }
+      .badge.info {
+        background: rgba(79, 156, 249, 0.15);
+        color: var(--accent);
+      }
+
+      .warm-bar-wrap {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 110px;
+      }
+
+      .mini-bar {
+        flex: 1;
+        height: 6px;
+        background: var(--surface2);
+        border-radius: 3px;
+        overflow: hidden;
+      }
+
+      .mini-fill {
+        height: 100%;
+        border-radius: 3px;
+        background: var(--warm);
+      }
+
+      .mini-pct {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--warm);
+        min-width: 34px;
+        text-align: right;
+      }
+
+      /* ── Pagination ── */
+      .pagination {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 10px 16px;
+        border-top: 1px solid var(--border);
+        justify-content: flex-end;
+      }
+
+      .pagination button {
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        color: var(--text);
+        border-radius: 5px;
+        padding: 4px 10px;
+        cursor: pointer;
+        font-size: 12px;
+        transition: background 0.15s;
+      }
+
+      .pagination button:hover:not(:disabled) {
+        background: var(--surface);
+      }
+      .pagination button:disabled {
+        opacity: 0.35;
+        cursor: default;
+      }
+      .pagination button.active {
+        background: var(--accent);
+        color: #fff;
+        border-color: var(--accent);
+      }
+
+      .pagination-info {
+        font-size: 12px;
+        color: var(--muted);
+        margin-right: 8px;
+      }
+
+      /* ── States ── */
+      .state-box {
+        padding: 40px 20px;
+        text-align: center;
+        color: var(--muted);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .state-box svg {
+        opacity: 0.4;
+      }
+
+      .state-box.error-state {
+        color: var(--danger);
+      }
+
+      .spinner {
+        width: 28px;
+        height: 28px;
+        border: 3px solid var(--border);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 0.7s linear infinite;
+      }
+
+      .no-data {
+        font-size: 13px;
+      }
+      .error-msg {
+        font-size: 13px;
+      }
+
+      /* ── Misc ── */
+      .timestamp {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .range-note {
+        font-size: 11px;
+        color: var(--muted);
+        margin-left: 2px;
+      }
+
+      /* number column */
+      .td-num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- ───────────────────────── Header ───────────────────────── -->
+    <header class="page-header">
+      <h1>📊 Media Stats</h1>
+
+      <div class="controls">
+        <!-- Time range -->
+        <span class="label-tag">Range:</span>
+        <div class="btn-group" id="rangeGroup">
+          <button data-range="3600000">1h</button>
+          <button data-range="21600000">6h</button>
+          <button data-range="86400000">24h</button>
+          <button data-range="259200000">3d</button>
+          <button data-range="604800000" class="active">7d</button>
+        </div>
+
+        <div class="sep"></div>
+
+        <!-- Resource type -->
+        <span class="label-tag">Type:</span>
+        <div class="btn-group" id="typeGroup">
+          <button data-rt="all" class="active">All</button>
+          <button data-rt="image">Images</button>
+          <button data-rt="video">Videos</button>
+        </div>
+
+        <div class="sep"></div>
+
+        <!-- Search (file path) -->
+        <div class="search-wrap">
+          <svg
+            class="search-icon"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <circle cx="11" cy="11" r="8" />
+            <path d="M21 21l-4.35-4.35" />
+          </svg>
+          <input
+            type="text"
+            id="searchInput"
+            placeholder="Search file path…"
+            autocomplete="off"
+          />
+        </div>
+
+        <!-- Refresh -->
+        <button class="icon-btn" id="refreshBtn">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <polyline points="23 4 23 10 17 10" />
+            <polyline points="1 20 1 14 7 14" />
+            <path
+              d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"
+            />
+          </svg>
+          Refresh
+        </button>
+      </div>
+
+      <div class="header-spacer"></div>
+      <div class="timestamp" id="lastUpdated">—</div>
+    </header>
+
+    <!-- ───────────────────────── Main ───────────────────────── -->
+    <main>
+      <!-- Summary cards -->
+      <div class="cards">
+        <div class="card">
+          <div class="card-label">Total Requests</div>
+          <div class="card-value" id="cardTotal">—</div>
+          <div class="card-sub" id="cardTotalSub">image + video</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Warm (HIT)</div>
+          <div class="card-value warm" id="cardWarm">—</div>
+          <div class="card-sub" id="cardWarmSub">cached responses</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Cold (MISS)</div>
+          <div class="card-value cold" id="cardCold">—</div>
+          <div class="card-sub" id="cardColdSub">transformed on-the-fly</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Cache Hit Rate</div>
+          <div class="card-value warm" id="cardHitRate">—</div>
+          <div class="card-sub">warm / total</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Errors / Warnings</div>
+          <div class="card-value danger" id="cardErrors">—</div>
+          <div class="card-sub">status ≥ 400</div>
+        </div>
+      </div>
+
+      <!-- Chart + Breakdown row -->
+      <div class="chart-row">
+        <!-- Donut chart -->
+        <div class="chart-box">
+          <div class="chart-title">Cache Ratio</div>
+          <canvas id="cacheChart"></canvas>
+          <div class="chart-legend" id="chartLegend">
+            <div class="state-box"><div class="spinner"></div></div>
+          </div>
+        </div>
+
+        <!-- Per-type breakdown -->
+        <div class="breakdown-box">
+          <div class="breakdown-title">Breakdown by Resource Type</div>
+          <div id="breakdownContent">
+            <div class="state-box"><div class="spinner"></div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Top Requested Files -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Most Requested Files</span>
+          <span class="panel-count" id="topFilesCount">—</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 36px">#</th>
+                <th>File Path</th>
+                <th>Type</th>
+                <th class="td-num">Total</th>
+                <th class="td-num">Warm</th>
+                <th class="td-num">Cold</th>
+                <th style="min-width: 130px">Warm %</th>
+              </tr>
+            </thead>
+            <tbody id="topFilesBody">
+              <tr>
+                <td colspan="7">
+                  <div class="state-box"><div class="spinner"></div></div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pagination" id="topFilesPagination"></div>
+      </div>
+
+      <!-- Errors & Warnings -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Errors &amp; Warnings</span>
+          <span class="panel-count" id="errorsCount">—</span>
+          <span class="range-note">(up to 2 000 log entries)</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 36px">#</th>
+                <th>Path</th>
+                <th>Method</th>
+                <th>Status</th>
+                <th>Level</th>
+                <th class="td-num">Count</th>
+                <th>Last Seen</th>
+              </tr>
+            </thead>
+            <tbody id="errorsBody">
+              <tr>
+                <td colspan="7">
+                  <div class="state-box"><div class="spinner"></div></div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pagination" id="errorsPagination"></div>
+      </div>
+    </main>
+
+    <!-- ───────────────────────── Script ───────────────────────── -->
+    <script>
+      "use strict";
+
+      // ── Config (server-hydrated) ─────────────────────────────────────────────────
+      const API_KEY = "__STATS_API_KEY__";
+      const APP_NAME = "__APP_NAME__";
+
+      // ── State ────────────────────────────────────────────────────────────────────
+      const PAGE_SIZE = 25;
+
+      let state = {
+        rangeMs: 604_800_000, // 7d default
+        resourceType: "all",
+        search: "",
+        topFilesPage: 1,
+        errorsPage: 1,
+        topFilesData: [], // fully aggregated, sorted
+        errorsData: [], // aggregated error rows, sorted
+        loading: false,
+      };
+
+      let cacheChart = null;
+
+      // ── DOM refs ─────────────────────────────────────────────────────────────────
+      const $ = (id) => document.getElementById(id);
+      const rangeGroup = $("rangeGroup");
+      const typeGroup = $("typeGroup");
+      const searchInput = $("searchInput");
+      const refreshBtn = $("refreshBtn");
+      const lastUpdated = $("lastUpdated");
+      const cardTotal = $("cardTotal");
+      const cardWarm = $("cardWarm");
+      const cardCold = $("cardCold");
+      const cardHitRate = $("cardHitRate");
+      const cardErrors = $("cardErrors");
+      const chartLegend = $("chartLegend");
+      const breakdownContent = $("breakdownContent");
+      const topFilesBody = $("topFilesBody");
+      const topFilesCount = $("topFilesCount");
+      const topFilesPagination = $("topFilesPagination");
+      const errorsBody = $("errorsBody");
+      const errorsCount = $("errorsCount");
+      const errorsPagination = $("errorsPagination");
+
+      // ── Utilities ────────────────────────────────────────────────────────────────
+      function fmtNum(n) {
+        if (n == null || isNaN(n)) return "—";
+        return Number(n).toLocaleString();
+      }
+      function fmtPct(num, den) {
+        if (!den) return "—";
+        return ((num / den) * 100).toFixed(1) + "%";
+      }
+      function fmtTime(isoOrMs) {
+        if (!isoOrMs) return "—";
+        const d =
+          typeof isoOrMs === "number" ? new Date(isoOrMs) : new Date(isoOrMs);
+        if (isNaN(d)) return "—";
+        const now = Date.now();
+        const diff = now - d.getTime();
+        if (diff < 60_000) return "just now";
+        if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+        if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+        return d.toLocaleDateString(undefined, {
+          month: "short",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+      }
+      function escapeHtml(str) {
+        return String(str ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      }
+      function debounce(fn, ms) {
+        let t;
+        return (...args) => {
+          clearTimeout(t);
+          t = setTimeout(() => fn(...args), ms);
+        };
+      }
+
+      // ── Loki query helper ────────────────────────────────────────────────────────
+      async function lokiQuery(type, extra = {}) {
+        const now = Date.now();
+        const start = now - state.rangeMs;
+
+        const params = new URLSearchParams({
+          type,
+          start: String(start),
+          end: String(now),
+          resource_type: state.resourceType,
+          ...extra,
+        });
+        if (state.search) params.set("search", state.search);
+
+        const resp = await fetch(`/stats/query?${params}`, {
+          headers: { "X-API-Key": API_KEY },
+        });
+
+        if (!resp.ok) {
+          const body = await resp.json().catch(() => ({}));
+          throw new Error(body.error || `HTTP ${resp.status}`);
+        }
+        return resp.json();
+      }
+
+      // ── Parse Loki vector result (metric query) ──────────────────────────────────
+      function parseVector(data) {
+        // Returns array of { metric: {...}, value: [ts, "count"] }
+        return data?.data?.result ?? [];
+      }
+
+      // ── Parse Loki stream result (log query) ─────────────────────────────────────
+      function parseStreams(data) {
+        const rows = [];
+        for (const stream of data?.data?.result ?? []) {
+          for (const [tsNs, line] of stream.values ?? []) {
+            try {
+              const parsed = JSON.parse(line);
+              rows.push({
+                tsMs: Math.floor(Number(tsNs) / 1_000_000),
+                ...parsed,
+              });
+            } catch {
+              /* corrupted line — skip */
+            }
+          }
+        }
+        return rows;
+      }
+
+      // ── Build top-files rows from vector ────────────────────────────────────────
+      function buildTopFiles(vectorResult) {
+        const map = new Map();
+
+        for (const item of vectorResult) {
+          const { file_path, resource_type, transformed } = item.metric;
+          if (!file_path) continue;
+          const count = parseInt(item.value[1], 10) || 0;
+
+          let entry = map.get(file_path);
+          if (!entry) {
+            entry = {
+              file_path,
+              resource_type: resource_type || "image",
+              warm: 0,
+              cold: 0,
+            };
+            map.set(file_path, entry);
+          }
+          if (transformed === "warm") entry.warm += count;
+          else entry.cold += count;
+          if (resource_type) entry.resource_type = resource_type;
+        }
+
+        return Array.from(map.values())
+          .map((e) => ({
+            ...e,
+            total: e.warm + e.cold,
+            warmPct: e.warm + e.cold > 0 ? e.warm / (e.warm + e.cold) : 0,
+          }))
+          .sort((a, b) => b.total - a.total);
+      }
+
+      // ── Build warm/cold summary from vector ─────────────────────────────────────
+      function buildWarmCold(vectorResult) {
+        const totals = {
+          warm: 0,
+          cold: 0,
+          image_warm: 0,
+          image_cold: 0,
+          video_warm: 0,
+          video_cold: 0,
+        };
+        for (const item of vectorResult) {
+          const { transformed, resource_type } = item.metric;
+          const count = parseInt(item.value[1], 10) || 0;
+          if (transformed === "warm") totals.warm += count;
+          if (transformed === "cold") totals.cold += count;
+          if (resource_type === "image" && transformed === "warm")
+            totals.image_warm += count;
+          if (resource_type === "image" && transformed === "cold")
+            totals.image_cold += count;
+          if (resource_type === "video" && transformed === "warm")
+            totals.video_warm += count;
+          if (resource_type === "video" && transformed === "cold")
+            totals.video_cold += count;
+        }
+        return totals;
+      }
+
+      // ── Build errors rows from log stream ────────────────────────────────────────
+      function buildErrors(logRows, search) {
+        const map = new Map();
+        const searchLc = (search || "").toLowerCase();
+
+        for (const row of logRows) {
+          const path = row.path || row.url || "unknown";
+          const method = row.http_method || "—";
+          const status = String(row.status_code || "");
+          const level = row.level || "warn";
+          const key = `${method}|${path}|${status}`;
+
+          // client-side search filter for errors table
+          if (searchLc && !path.toLowerCase().includes(searchLc)) continue;
+
+          let entry = map.get(key);
+          if (!entry) {
+            entry = { path, method, status, level, count: 0, lastSeenMs: 0 };
+            map.set(key, entry);
+          }
+          entry.count++;
+          if (row.tsMs > entry.lastSeenMs) {
+            entry.lastSeenMs = row.tsMs;
+            entry.level = level; // take level from most recent entry
+          }
+        }
+
+        return Array.from(map.values()).sort((a, b) => b.count - a.count);
+      }
+
+      // ── Status-code badge ─────────────────────────────────────────────────────────
+      function statusBadge(code) {
+        const n = parseInt(code, 10);
+        const cls = n >= 500 ? "error" : "warn";
+        return `<span class="badge ${cls}">${escapeHtml(code)}</span>`;
+      }
+
+      function levelBadge(level) {
+        const cls =
+          level === "error" ? "error" : level === "warn" ? "warn" : "info";
+        return `<span class="badge ${cls}">${escapeHtml(level)}</span>`;
+      }
+
+      // ── Render helpers ────────────────────────────────────────────────────────────
+      function renderSpinner() {
+        return `<tr><td colspan="7"><div class="state-box"><div class="spinner"></div><span class="no-data">Loading…</span></div></td></tr>`;
+      }
+
+      function renderNoData(cols = 7) {
+        return `<tr><td colspan="${cols}"><div class="state-box">
+    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M9 9h.01M15 9h.01"/><path d="M9 15c.83 1 2 1.5 3 1.5s2.17-.5 3-1.5"/></svg>
+    <span class="no-data">No data for selected range</span>
+  </div></td></tr>`;
+      }
+
+      function renderTableError(msg, cols = 7) {
+        return `<tr><td colspan="${cols}"><div class="state-box error-state">
+    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+    <span class="error-msg">${escapeHtml(msg)}</span>
+  </div></td></tr>`;
+      }
+
+      // ── Render top-files table page ───────────────────────────────────────────────
+      function renderTopFilesTable() {
+        const data = state.topFilesData;
+        const page = state.topFilesPage;
+        const total = data.length;
+        const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+        const slice = data.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+        topFilesCount.textContent = `${fmtNum(total)} files`;
+
+        if (!slice.length) {
+          topFilesBody.innerHTML = renderNoData(7);
+          topFilesPagination.innerHTML = "";
+          return;
+        }
+
+        const offset = (page - 1) * PAGE_SIZE;
+        topFilesBody.innerHTML = slice
+          .map((row, i) => {
+            const pct = Math.round(row.warmPct * 100);
+            return `<tr>
+      <td class="td-num" style="color:var(--muted)">${offset + i + 1}</td>
+      <td class="td-path" title="${escapeHtml(row.file_path)}">${escapeHtml(row.file_path)}</td>
+      <td><span class="badge ${row.resource_type}">${escapeHtml(row.resource_type)}</span></td>
+      <td class="td-num"><strong>${fmtNum(row.total)}</strong></td>
+      <td class="td-num" style="color:var(--warm)">${fmtNum(row.warm)}</td>
+      <td class="td-num" style="color:var(--cold)">${fmtNum(row.cold)}</td>
+      <td>
+        <div class="warm-bar-wrap">
+          <div class="mini-bar"><div class="mini-fill" style="width:${pct}%"></div></div>
+          <span class="mini-pct">${pct}%</span>
+        </div>
+      </td>
+    </tr>`;
+          })
+          .join("");
+
+        renderPagination(topFilesPagination, page, pageCount, (p) => {
+          state.topFilesPage = p;
+          renderTopFilesTable();
+        });
+      }
+
+      // ── Render errors table page ──────────────────────────────────────────────────
+      function renderErrorsTable() {
+        const data = state.errorsData;
+        const page = state.errorsPage;
+        const total = data.length;
+        const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+        const slice = data.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+        errorsCount.textContent = `${fmtNum(total)} unique paths`;
+
+        if (!slice.length) {
+          errorsBody.innerHTML = renderNoData(7);
+          errorsPagination.innerHTML = "";
+          return;
+        }
+
+        const offset = (page - 1) * PAGE_SIZE;
+        errorsBody.innerHTML = slice
+          .map(
+            (row, i) => `<tr>
+    <td class="td-num" style="color:var(--muted)">${offset + i + 1}</td>
+    <td class="td-path" title="${escapeHtml(row.path)}">${escapeHtml(row.path)}</td>
+    <td style="font-weight:600;color:var(--muted)">${escapeHtml(row.method)}</td>
+    <td>${statusBadge(row.status)}</td>
+    <td>${levelBadge(row.level)}</td>
+    <td class="td-num"><strong>${fmtNum(row.count)}</strong></td>
+    <td class="timestamp">${fmtTime(row.lastSeenMs)}</td>
+  </tr>`,
+          )
+          .join("");
+
+        renderPagination(errorsPagination, page, pageCount, (p) => {
+          state.errorsPage = p;
+          renderErrorsTable();
+        });
+      }
+
+      // ── Render pagination controls ────────────────────────────────────────────────
+      function renderPagination(container, current, total, onClick) {
+        if (total <= 1) {
+          container.innerHTML = "";
+          return;
+        }
+
+        const MAX_BTNS = 7;
+        let pages = [];
+
+        if (total <= MAX_BTNS) {
+          pages = Array.from({ length: total }, (_, i) => i + 1);
+        } else {
+          pages = [1];
+          let lo = Math.max(2, current - 2);
+          let hi = Math.min(total - 1, current + 2);
+          if (lo > 2) pages.push("…");
+          for (let p = lo; p <= hi; p++) pages.push(p);
+          if (hi < total - 1) pages.push("…");
+          pages.push(total);
+        }
+
+        const info = `<span class="pagination-info">Page ${current} / ${total}</span>`;
+
+        const prev = `<button ${current <= 1 ? "disabled" : ""} data-page="${current - 1}">‹</button>`;
+        const next = `<button ${current >= total ? "disabled" : ""} data-page="${current + 1}">›</button>`;
+
+        const btns = pages
+          .map((p) =>
+            p === "…"
+              ? `<button disabled>…</button>`
+              : `<button class="${p === current ? "active" : ""}" data-page="${p}">${p}</button>`,
+          )
+          .join("");
+
+        container.innerHTML = info + prev + btns + next;
+
+        container.querySelectorAll("button[data-page]").forEach((btn) => {
+          btn.addEventListener("click", () =>
+            onClick(Number(btn.dataset.page)),
+          );
+        });
+      }
+
+      // ── Update summary cards ──────────────────────────────────────────────────────
+      function updateCards(warmCold, errCount) {
+        const w = warmCold.warm;
+        const c = warmCold.cold;
+        const total = w + c;
+        cardTotal.textContent = fmtNum(total);
+        cardWarm.textContent = fmtNum(w);
+        cardCold.textContent = fmtNum(c);
+        cardHitRate.textContent = total
+          ? ((w / total) * 100).toFixed(1) + "%"
+          : "—";
+        cardErrors.textContent = fmtNum(errCount);
+      }
+
+      // ── Update donut chart ────────────────────────────────────────────────────────
+      function updateChart(warmCold) {
+        const w = warmCold.warm;
+        const c = warmCold.cold;
+        const total = w + c;
+
+        const wPct = total ? ((w / total) * 100).toFixed(1) : 0;
+        const cPct = total ? ((c / total) * 100).toFixed(1) : 0;
+
+        chartLegend.innerHTML = `
+    <div class="legend-item">
+      <div class="legend-dot" style="background:var(--warm)"></div>
+      <span class="legend-label">Warm (HIT)</span>
+      <span class="legend-value" style="color:var(--warm)">${fmtNum(w)}</span>
+      <span class="legend-pct">${wPct}%</span>
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:var(--cold)"></div>
+      <span class="legend-label">Cold (MISS)</span>
+      <span class="legend-value" style="color:var(--cold)">${fmtNum(c)}</span>
+      <span class="legend-pct">${cPct}%</span>
+    </div>
+  `;
+
+        const ctx = $("cacheChart").getContext("2d");
+        const chartData = {
+          labels: ["Warm (HIT)", "Cold (MISS)"],
+          datasets: [
+            {
+              data: total ? [w, c] : [1, 0],
+              backgroundColor: total
+                ? ["#34d399", "#f59e0b"]
+                : ["#2a3147", "#2a3147"],
+              borderWidth: 0,
+              hoverOffset: 4,
+            },
+          ],
+        };
+
+        if (cacheChart) {
+          cacheChart.data = chartData;
+          cacheChart.update("active");
+        } else {
+          cacheChart = new Chart(ctx, {
+            type: "doughnut",
+            data: chartData,
+            options: {
+              cutout: "70%",
+              animation: { duration: 400 },
+              plugins: {
+                legend: { display: false },
+                tooltip: {
+                  callbacks: {
+                    label: (ctx) => {
+                      const val = ctx.raw;
+                      const pct = total ? ((val / total) * 100).toFixed(1) : 0;
+                      return ` ${fmtNum(val)}  (${pct}%)`;
+                    },
+                  },
+                },
+              },
+            },
+          });
+        }
+      }
+
+      // ── Update per-type breakdown ─────────────────────────────────────────────────
+      function updateBreakdown(warmCold) {
+        const rows = [
+          {
+            key: "image",
+            label: "Images",
+            w: warmCold.image_warm,
+            c: warmCold.image_cold,
+          },
+          {
+            key: "video",
+            label: "Videos",
+            w: warmCold.video_warm,
+            c: warmCold.video_cold,
+          },
+          { key: "total", label: "Total", w: warmCold.warm, c: warmCold.cold },
+        ];
+
+        breakdownContent.innerHTML = rows
+          .map(({ key, label, w, c }) => {
+            const total = w + c;
+            const wPct = total ? Math.round((w / total) * 100) : 0;
+            const cPct = 100 - wPct;
+            return `<div class="breakdown-row">
+      <span class="breakdown-type ${key}">${label}</span>
+      <div class="bar-track">
+        <div class="bar-fill warm" style="width:${wPct}%"></div>
+        <div class="bar-fill cold" style="width:${cPct}%"></div>
+      </div>
+      <div class="bar-numbers">
+        <span style="color:var(--warm)">${fmtNum(w)}</span>
+        <span style="color:var(--muted)"> / </span>
+        <span style="color:var(--cold)">${fmtNum(c)}</span>
+      </div>
+    </div>`;
+          })
+          .join("");
+      }
+
+      // ── Main fetch ────────────────────────────────────────────────────────────────
+      async function fetchAll() {
+        if (state.loading) return;
+        state.loading = true;
+
+        // Show loading state in tables
+        topFilesBody.innerHTML = renderSpinner();
+        errorsBody.innerHTML = renderSpinner();
+        topFilesPagination.innerHTML = "";
+        errorsPagination.innerHTML = "";
+        chartLegend.innerHTML = `<div class="state-box"><div class="spinner"></div></div>`;
+        breakdownContent.innerHTML = `<div class="state-box"><div class="spinner"></div></div>`;
+        refreshBtn.classList.add("spinning");
+
+        try {
+          // All three queries are independent — fire in parallel
+          const [topFilesResp, warmColdResp, errorsResp] =
+            await Promise.allSettled([
+              lokiQuery("top_files"),
+              lokiQuery("warm_cold"),
+              lokiQuery("errors"),
+            ]);
+
+          // ── Top files ──────────────────────────────────────────
+          if (topFilesResp.status === "fulfilled") {
+            const vector = parseVector(topFilesResp.value);
+            state.topFilesData = buildTopFiles(vector);
+          } else {
+            state.topFilesData = [];
+            topFilesBody.innerHTML = renderTableError(
+              topFilesResp.reason?.message ?? "Failed to load",
+            );
+          }
+
+          // ── Warm / cold ────────────────────────────────────────
+          let warmCold = {
+            warm: 0,
+            cold: 0,
+            image_warm: 0,
+            image_cold: 0,
+            video_warm: 0,
+            video_cold: 0,
+          };
+          if (warmColdResp.status === "fulfilled") {
+            warmCold = buildWarmCold(parseVector(warmColdResp.value));
+          } else {
+            chartLegend.innerHTML = `<span style="color:var(--danger);font-size:12px">${escapeHtml(warmColdResp.reason?.message ?? "Error")}</span>`;
+          }
+
+          // ── Errors ─────────────────────────────────────────────
+          let errorsData = [];
+          if (errorsResp.status === "fulfilled") {
+            const logRows = parseStreams(errorsResp.value);
+            errorsData = buildErrors(logRows, state.search);
+          } else {
+            errorsBody.innerHTML = renderTableError(
+              errorsResp.reason?.message ?? "Failed to load",
+            );
+          }
+          state.errorsData = errorsData;
+
+          // ── Update everything ──────────────────────────────────
+          updateCards(
+            warmCold,
+            errorsData.length > 0
+              ? errorsData.reduce((s, r) => s + r.count, 0)
+              : 0,
+          );
+          updateChart(warmCold);
+          updateBreakdown(warmCold);
+
+          state.topFilesPage = 1;
+          state.errorsPage = 1;
+          renderTopFilesTable();
+          renderErrorsTable();
+
+          lastUpdated.textContent = "Updated " + fmtTime(Date.now());
+        } finally {
+          state.loading = false;
+          refreshBtn.classList.remove("spinning");
+        }
+      }
+
+      // ── Event listeners ───────────────────────────────────────────────────────────
+      rangeGroup.addEventListener("click", (e) => {
+        const btn = e.target.closest("button[data-range]");
+        if (!btn) return;
+        rangeGroup
+          .querySelectorAll("button")
+          .forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        state.rangeMs = Number(btn.dataset.range);
+        fetchAll();
+      });
+
+      typeGroup.addEventListener("click", (e) => {
+        const btn = e.target.closest("button[data-rt]");
+        if (!btn) return;
+        typeGroup
+          .querySelectorAll("button")
+          .forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        state.resourceType = btn.dataset.rt;
+        fetchAll();
+      });
+
+      searchInput.addEventListener(
+        "input",
+        debounce(() => {
+          state.search = searchInput.value.trim();
+          fetchAll();
+        }, 500),
+      );
+
+      refreshBtn.addEventListener("click", fetchAll);
+
+      // ── Init ──────────────────────────────────────────────────────────────────────
+      fetchAll();
+    </script>
+  </body>
+</html>
