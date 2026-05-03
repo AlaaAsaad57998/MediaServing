@@ -67,11 +67,9 @@ async function statsRoutes(fastify) {
 
       // Validate type
       if (!["top_files", "warm_cold", "errors"].includes(type)) {
-        return reply
-          .code(400)
-          .send({
-            error: "Invalid type. Must be one of: top_files, warm_cold, errors",
-          });
+        return reply.code(400).send({
+          error: "Invalid type. Must be one of: top_files, warm_cold, errors",
+        });
       }
 
       // Validate time range (Unix milliseconds)
@@ -82,11 +80,9 @@ async function statsRoutes(fastify) {
         !Number.isFinite(endMs) ||
         startMs >= endMs
       ) {
-        return reply
-          .code(400)
-          .send({
-            error: "start and end must be valid Unix millisecond timestamps",
-          });
+        return reply.code(400).send({
+          error: "start and end must be valid Unix millisecond timestamps",
+        });
       }
       if (endMs - startMs > MAX_RANGE_MS) {
         return reply
@@ -94,9 +90,11 @@ async function statsRoutes(fastify) {
           .send({ error: "Time range exceeds 7-day maximum" });
       }
 
-      // Loki uses nanoseconds for time parameters
-      const startNs = String(Math.floor(startMs) * 1_000_000);
-      const endNs = String(Math.floor(endMs) * 1_000_000);
+      // Loki accepts ISO-8601 (RFC3339) strings for all time parameters.
+      // We use them instead of nanosecond integers to avoid Number precision
+      // loss — 1.78e21 ns is far beyond MAX_SAFE_INTEGER (~9e15).
+      const startIso = new Date(startMs).toISOString();
+      const endIso = new Date(endMs).toISOString();
 
       // Range string for LogQL range-vector selector (seconds)
       const rangeSeconds = Math.ceil((endMs - startMs) / 1000);
@@ -131,22 +129,22 @@ async function statsRoutes(fastify) {
         const lokiQuery = `sum by (file_path, resource_type, transformed) (count_over_time(${logStream} [${rangeStr}]))`;
         lokiPath = "/loki/api/v1/query";
         queryParams.set("query", lokiQuery);
-        queryParams.set("time", endNs);
+        queryParams.set("time", endIso);
       } else if (type === "warm_cold") {
         // Aggregated count per (transformed, resource_type) for warm/cold ratio.
         const logStream = `(${basePipeline} | transformed=~"warm|cold")`;
         const lokiQuery = `sum by (transformed, resource_type) (count_over_time(${logStream} [${rangeStr}]))`;
         lokiPath = "/loki/api/v1/query";
         queryParams.set("query", lokiQuery);
-        queryParams.set("time", endNs);
+        queryParams.set("time", endIso);
       } else {
         // Raw log stream query for error/warn entries — up to 2000 entries,
         // newest first so the frontend gets the most recent occurrences.
         const lokiQuery = `${basePipeline} | status_code >= 400`;
         lokiPath = "/loki/api/v1/query_range";
         queryParams.set("query", lokiQuery);
-        queryParams.set("start", startNs);
-        queryParams.set("end", endNs);
+        queryParams.set("start", startIso);
+        queryParams.set("end", endIso);
         queryParams.set("limit", "2000");
         queryParams.set("direction", "backward");
       }
@@ -167,17 +165,16 @@ async function statsRoutes(fastify) {
               component: "StatsRoute",
               loki_status: resp.status,
               loki_body: body.slice(0, 400),
+              loki_url: lokiUrl,
               query_type: type,
             },
             "Loki returned non-2xx response",
           );
-          return reply
-            .code(502)
-            .send({
-              error: "Loki query failed",
-              loki_status: resp.status,
-              detail: body.slice(0, 200),
-            });
+          return reply.code(502).send({
+            error: "Loki query failed",
+            loki_status: resp.status,
+            detail: body.slice(0, 400),
+          });
         }
 
         const data = await resp.json();
