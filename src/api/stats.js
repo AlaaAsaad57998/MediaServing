@@ -3,11 +3,28 @@
  * Loki queries so the browser never needs direct access to Loki.
  *
  * Environment variables consumed:
- *   LOKI_QUERY_URL  Base URL of the Loki HTTP API reachable from this container.
- *                   e.g. "http://loki:3100" or "http://host.docker.internal:3100"
- *                   Defaults to "http://loki:3100".
- *   APP_NAME        Docker container name used as the Loki label selector.
- *                   Defaults to "mediaserving-app-1".
+ *   LOKI_QUERY_URL   Base URL of the Loki HTTP API reachable from this container.
+ *                    e.g. "http://loki:3100" or "http://host.docker.internal:3100"
+ *                    Defaults to "http://loki:3100".
+ *                    Ignored when GRAFANA_URL + GRAFANA_TOKEN are set.
+ *
+ *   GRAFANA_URL      Base URL of the Grafana instance reachable from this container.
+ *                    e.g. "http://host.docker.internal:3001"
+ *                    When set together with GRAFANA_TOKEN, all Loki queries are
+ *                    routed through Grafana's datasource proxy instead of hitting
+ *                    Loki directly.  Takes priority over LOKI_QUERY_URL.
+ *
+ *   GRAFANA_TOKEN    Grafana service-account token (Bearer) used to authenticate
+ *                    requests to the Grafana API and datasource proxy.
+ *                    Never logged or forwarded to the browser.
+ *
+ *   GRAFANA_LOKI_UID Optional: explicit Loki datasource UID inside Grafana.
+ *                    If omitted the UID is discovered automatically on first use
+ *                    by querying GET /api/datasources and cached for the process
+ *                    lifetime.
+ *
+ *   APP_NAME         Docker container name used as the Loki label selector.
+ *                    Defaults to "mediaserving-app-1".
  */
 
 "use strict";
@@ -29,6 +46,58 @@ async function statsRoutes(fastify) {
     process.env.LOKI_QUERY_URL || "http://loki:3100"
   ).replace(/\/$/, "");
   const containerName = process.env.APP_NAME || "mediaserving-app-1";
+
+  // ── Grafana datasource proxy (optional, preferred over direct Loki) ────────
+  const grafanaBaseUrl = (process.env.GRAFANA_URL || "").replace(/\/$/, "");
+  const grafanaToken = process.env.GRAFANA_TOKEN || "";
+  const useGrafana = !!(grafanaBaseUrl && grafanaToken);
+
+  // Loki datasource UID inside Grafana — resolved once and cached.
+  let _lokiDsUid = (process.env.GRAFANA_LOKI_UID || "").trim();
+
+  async function resolveLokiDsUid() {
+    if (_lokiDsUid) return _lokiDsUid;
+    const resp = await fetch(`${grafanaBaseUrl}/api/datasources`, {
+      headers: { Authorization: `Bearer ${grafanaToken}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!resp.ok) {
+      throw new Error(
+        `Grafana /api/datasources returned HTTP ${resp.status}`,
+      );
+    }
+    const list = await resp.json();
+    const loki = list.find((ds) => ds.type === "loki");
+    if (!loki) throw new Error("No Loki datasource found in Grafana");
+    _lokiDsUid = loki.uid;
+    fastify.log.info(
+      { lokiDsUid: _lokiDsUid },
+      "Resolved Loki datasource UID from Grafana",
+    );
+    return _lokiDsUid;
+  }
+
+  /**
+   * Build the full Loki request URL and headers.
+   * When useGrafana is true the request is routed through Grafana's datasource
+   * proxy so the token stays server-side and CORS is not an issue.
+   */
+  async function buildLokiRequest(lokiPath, queryParams) {
+    if (useGrafana) {
+      const uid = await resolveLokiDsUid();
+      return {
+        url: `${grafanaBaseUrl}/api/datasources/proxy/uid/${uid}${lokiPath}?${queryParams}`,
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${grafanaToken}`,
+        },
+      };
+    }
+    return {
+      url: `${lokiBaseUrl}${lokiPath}?${queryParams}`,
+      headers: { Accept: "application/json" },
+    };
+  }
 
   // ── HTML page serving ──────────────────────────────────────────────────
 
@@ -149,11 +218,28 @@ async function statsRoutes(fastify) {
         queryParams.set("direction", "backward");
       }
 
-      const lokiUrl = `${lokiBaseUrl}${lokiPath}?${queryParams.toString()}`;
+      let lokiReqUrl, lokiReqHeaders;
+      try {
+        const req = await buildLokiRequest(lokiPath, queryParams.toString());
+        lokiReqUrl = req.url;
+        lokiReqHeaders = req.headers;
+      } catch (err) {
+        request.log.error(
+          {
+            service: "media-serving",
+            component: "StatsRoute",
+            error_message: err.message,
+          },
+          "Failed to build Loki request (Grafana UID resolution failed)",
+        );
+        return reply
+          .code(502)
+          .send({ error: "Failed to resolve Loki datasource", detail: err.message });
+      }
 
       try {
-        const resp = await fetch(lokiUrl, {
-          headers: { Accept: "application/json" },
+        const resp = await fetch(lokiReqUrl, {
+          headers: lokiReqHeaders,
           signal: AbortSignal.timeout(LOKI_FETCH_TIMEOUT_MS),
         });
 
@@ -165,7 +251,8 @@ async function statsRoutes(fastify) {
               component: "StatsRoute",
               loki_status: resp.status,
               loki_body: body.slice(0, 400),
-              loki_url: lokiUrl,
+              // Omit URL to avoid leaking credentials in logs
+              loki_backend: useGrafana ? "grafana-proxy" : lokiBaseUrl,
               query_type: type,
             },
             "Loki returned non-2xx response",
@@ -187,7 +274,7 @@ async function statsRoutes(fastify) {
             env: process.env.NODE_ENV,
             error_message: err.message,
             query_type: type,
-            loki_url: lokiBaseUrl,
+            loki_backend: useGrafana ? "grafana-proxy" : lokiBaseUrl,
           },
           "Failed to reach Loki",
         );

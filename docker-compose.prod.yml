@@ -34,7 +34,19 @@ services:
       FFMPEG_VP9_CPU_USED: "6"
       # Loki query URL reachable from within this container.
       # host.docker.internal resolves to the Docker host via the extra_hosts entry below.
+      # Used only when GRAFANA_URL / GRAFANA_TOKEN are not set.
       LOKI_QUERY_URL: "${LOKI_QUERY_URL:-http://host.docker.internal:3100}"
+
+      # Grafana datasource proxy — preferred over direct Loki.
+      # Set both vars in .env.production to route all Loki queries through
+      # Grafana instead of hitting Loki directly.
+      #   GRAFANA_URL=http://host.docker.internal:3001
+      #   GRAFANA_TOKEN=glsa_...
+      GRAFANA_URL: "${GRAFANA_URL:-}"
+      GRAFANA_TOKEN: "${GRAFANA_TOKEN:-}"
+      # If the Loki datasource UID inside Grafana is known, set it here to skip
+      # the automatic discovery call on first use.
+      GRAFANA_LOKI_UID: "P8E80F9AEF21F6940"
 
     # Allow the container to reach Loki running on the Docker host (port 3100).
     extra_hosts:
