@@ -9,6 +9,12 @@
  * Usage:
  *   node src/scripts/migrate-cloudinary.js [options]
  *
+ *
+ *
+ *
+ * sudo docker exec -it $(sudo docker ps -q --filter ancestor=media-serving:latest)   node src/scripts/migrate-cloudinary.js --limit 0 --concurrency 10
+ *
+ *
  * Options:
  *   --dry-run           List resources without uploading
  *   --limit <n>         Max assets to process (default: 20, 0 = unlimited)

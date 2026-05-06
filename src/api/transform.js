@@ -358,8 +358,10 @@ async function transformRoutes(fastify) {
       return sendOriginal(request, filePath, reply);
     }
 
-    // Always output webp regardless of f_ param
-    params.f = "webp";
+    // Default to webp, but allow jpg/jpeg; all other formats default to webp
+    if (params.f !== "jpg" && params.f !== "jpeg") {
+      params.f = "webp";
+    }
 
     // Resolve q_auto to a concrete integer for deterministic cache keys
     if (typeof params.q === "string" && params.q.startsWith("auto")) {

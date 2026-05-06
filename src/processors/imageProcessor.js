@@ -52,8 +52,13 @@ async function processImage(inputBuffer, params) {
   }
 
   // Format conversion
-  const format = params.f ? FORMAT_MAP[params.f] : null;
+  let format = params.f ? FORMAT_MAP[params.f] : null;
   const quality = params.q || undefined;
+
+  // Default to webp if no format or auto format
+  if (!format || params.f === "auto") {
+    format = "webp";
+  }
 
   // fl_lossy on PNG: re-encode as PNG with quality hint
   if (params.fl_lossy && (!format || format === "png")) {
