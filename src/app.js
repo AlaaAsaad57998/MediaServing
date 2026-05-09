@@ -50,6 +50,23 @@ function parseCorsOrigin(value) {
   };
 }
 
+function isSocialPreviewCrawler(userAgent) {
+  if (!userAgent) return false;
+
+  return /facebookexternalhit|facebot|twitterbot|linkedinbot|slackbot|discordbot|whatsapp|telegrambot|pinterest|skypeuripreview|google-inspectiontool/i.test(
+    String(userAgent),
+  );
+}
+
+function isPublicMediaPath(url) {
+  const pathOnly = String(url || "").split("?")[0];
+  return (
+    pathOnly.includes("/media/upload/") ||
+    pathOnly.includes("/image/upload/") ||
+    pathOnly.includes("/video/upload/")
+  );
+}
+
 function buildApp(opts = {}) {
   const isProd = process.env.NODE_ENV === "production";
   const app = fastify({
@@ -143,6 +160,12 @@ function buildApp(opts = {}) {
     keyGenerator(request) {
       const apiKey = request.headers["x-api-key"];
       return apiKey ? `k:${apiKey}` : `ip:${request.ip}`;
+    },
+    allowList(request) {
+      // Social preview bots should not be throttled on public media endpoints.
+      if (request.method !== "GET") return false;
+      if (!isPublicMediaPath(request.url)) return false;
+      return isSocialPreviewCrawler(request.headers["user-agent"]);
     },
     errorResponseBuilder(request, context) {
       return {
