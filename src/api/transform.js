@@ -825,7 +825,6 @@ async function transformRoutes(fastify) {
   //   - Videos: all URL params ignored, only ?target= matters
 
   fastify.get("/:resourceType/upload/*", routeConfig, handleRequest);
-  fastify.head("/:resourceType/upload/*", routeConfig, handleRequest);
 }
 
 module.exports = transformRoutes;
