@@ -44,6 +44,29 @@ function setMediaCacheHeaders(reply) {
   );
 }
 
+function setImageDeliveryHeaders(reply) {
+  // Social preview crawlers can be strict about image response metadata.
+  reply.header("X-Content-Type-Options", "nosniff");
+  reply.header("Cross-Origin-Resource-Policy", "cross-origin");
+  reply.header("Content-Disposition", "inline");
+}
+
+function isSocialCrawler(request) {
+  const userAgent = String(request?.headers?.["user-agent"] || "");
+  if (!userAgent) return false;
+
+  return /facebookexternalhit|facebot|twitterbot|linkedinbot|slackbot|discordbot|whatsapp|telegrambot|pinterest|skypeuripreview|google-inspectiontool/i.test(
+    userAgent,
+  );
+}
+
+function resolveDefaultImageFormat(request) {
+  if (isSocialCrawler(request)) {
+    return (process.env.SOCIAL_IMAGE_DEFAULT_FORMAT || "jpg").toLowerCase();
+  }
+  return "webp";
+}
+
 function setVideoDeliveryHeaders(reply) {
   reply.header("Accept-Ranges", "bytes");
 }
@@ -358,9 +381,10 @@ async function transformRoutes(fastify) {
       return sendOriginal(request, filePath, reply);
     }
 
-    // Default to webp, but allow jpg/jpeg; all other formats default to webp
-    if (params.f !== "jpg" && params.f !== "jpeg") {
-      params.f = "webp";
+    // If format is not explicitly requested, choose a crawler-safe default.
+    // We keep WebP for normal browsers, and use JPEG for social bots.
+    if (typeof params.f !== "string" || !VALID_IMAGE_FORMATS.has(params.f)) {
+      params.f = resolveDefaultImageFormat(request);
     }
 
     // Resolve q_auto to a concrete integer for deterministic cache keys
@@ -379,6 +403,7 @@ async function transformRoutes(fastify) {
       const { buffer, contentType } = await getFromCache(derivedKey);
       reply.header("Content-Type", contentType);
       setMediaCacheHeaders(reply);
+      setImageDeliveryHeaders(reply);
       reply.header("X-Cache", "HIT");
       stampLogExtra(request, { isVideo: false, filePath, cacheStatus: "HIT" });
       return reply.send(buffer);
@@ -397,6 +422,7 @@ async function transformRoutes(fastify) {
         const { buffer, contentType } = await getFromCache(derivedKey);
         reply.header("Content-Type", contentType);
         setMediaCacheHeaders(reply);
+        setImageDeliveryHeaders(reply);
         reply.header("X-Cache", "HIT");
         stampLogExtra(request, {
           isVideo: false,
@@ -447,6 +473,7 @@ async function transformRoutes(fastify) {
 
       reply.header("Content-Type", contentType);
       setMediaCacheHeaders(reply);
+      setImageDeliveryHeaders(reply);
       reply.header("X-Cache", "MISS");
       stampLogExtra(request, { isVideo: false, filePath, cacheStatus: "MISS" });
       return reply.send(buffer);
@@ -770,6 +797,7 @@ async function transformRoutes(fastify) {
       const { buffer, contentType } = await getObjectBuffer(originalKey);
       reply.header("Content-Type", contentType || "application/octet-stream");
       setMediaCacheHeaders(reply);
+      setImageDeliveryHeaders(reply);
       reply.header("X-Cache", "BYPASS");
       stampLogExtra(request, {
         isVideo: false,
@@ -797,6 +825,7 @@ async function transformRoutes(fastify) {
   //   - Videos: all URL params ignored, only ?target= matters
 
   fastify.get("/:resourceType/upload/*", routeConfig, handleRequest);
+  fastify.head("/:resourceType/upload/*", routeConfig, handleRequest);
 }
 
 module.exports = transformRoutes;
