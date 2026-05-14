@@ -293,7 +293,7 @@ async function uploadRoutes(fastify) {
       }
 
       // Return only public ID with extension, without folder segments.
-      const urls = items.map((i) => `/${path.basename(i.key)}`);
+      const urls = items.map((i) => path.basename(i.key));
       const totalFileSize = items.reduce((sum, i) => sum + (i.size || 0), 0);
       request._logExtra = {
         component: "UploadRoute",
