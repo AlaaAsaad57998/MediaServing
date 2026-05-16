@@ -113,17 +113,29 @@ async function uploadRoutes(fastify) {
     },
     async (request, reply) => {
       const storyMode = isTrueLike(request.query?.story);
-      const data = await request.file();
 
-      if (!data) {
+      // Collect all parts first so the folder field is available regardless
+      // of whether it appears before or after the file in the stream.
+      const collectedFields = {};
+      let filePart = null;
+      for await (const part of request.parts({ limits: { fileSize: maxFileSize } })) {
+        if (part.type === "field") {
+          collectedFields[part.fieldname] =
+            typeof part.value === "string"
+              ? part.value
+              : String(part.value ?? "");
+        } else if (part.type === "file" && filePart === null) {
+          filePart = { buffer: await part.toBuffer(), filename: part.filename, mimetype: part.mimetype };
+        } else if (part.type === "file") {
+          await part.toBuffer(); // drain unexpected extra files
+        }
+      }
+
+      if (!filePart) {
         return reply.code(400).send({ error: "File is required" });
       }
 
-      const chunks = [];
-      for await (const chunk of data.file) {
-        chunks.push(chunk);
-      }
-      const buffer = Buffer.concat(chunks);
+      const { buffer, filename: dataFilename, mimetype: dataMimetype } = filePart;
 
       if (buffer.length === 0) {
         return reply.code(400).send({ error: "Uploaded file is empty" });
@@ -133,8 +145,8 @@ async function uploadRoutes(fastify) {
       if (storyMode) {
         const validation = await validateStoryVideoConstraints(
           buffer,
-          data.filename,
-          data.mimetype,
+          dataFilename,
+          dataMimetype,
         );
         if (!validation.ok) {
           return reply.code(400).send({ error: validation.error });
@@ -142,12 +154,12 @@ async function uploadRoutes(fastify) {
         storyVideoDurationSeconds = validation.durationSeconds;
       }
 
-      const folder = data.fields?.folder?.value || "";
+      const folder = collectedFields.folder || "";
 
       const item = await saveUploadedImage(
         buffer,
-        data.filename,
-        data.mimetype,
+        dataFilename,
+        dataMimetype,
         folder,
         { story: storyMode },
       );
@@ -200,19 +212,19 @@ async function uploadRoutes(fastify) {
     },
     async (request, reply) => {
       const storyMode = isTrueLike(request.query?.story);
-      let folder = "";
-      const items = [];
 
+      // Collect all parts first so the folder field is available regardless
+      // of whether it appears before or after the files in the stream.
+      const collectedFields = {};
+      const collectedFiles = [];
       for await (const part of request.parts({
         limits: bulkMultipartLimits,
       })) {
         if (part.type === "field") {
-          if (part.fieldname === "folder") {
-            folder =
-              typeof part.value === "string"
-                ? part.value
-                : String(part.value ?? "");
-          }
+          collectedFields[part.fieldname] =
+            typeof part.value === "string"
+              ? part.value
+              : String(part.value ?? "");
           continue;
         }
 
@@ -228,12 +240,19 @@ async function uploadRoutes(fastify) {
             .send({ error: "One or more uploaded files are empty" });
         }
 
+        collectedFiles.push({ buffer, filename: part.filename, mimetype: part.mimetype });
+      }
+
+      const folder = collectedFields.folder || "";
+      const items = [];
+
+      for (const { buffer, filename, mimetype } of collectedFiles) {
         let storyVideoDurationSeconds = null;
         if (storyMode) {
           const validation = await validateStoryVideoConstraints(
             buffer,
-            part.filename,
-            part.mimetype,
+            filename,
+            mimetype,
           );
           if (!validation.ok) {
             return reply.code(400).send({ error: validation.error });
@@ -243,8 +262,8 @@ async function uploadRoutes(fastify) {
 
         const item = await saveUploadedImage(
           buffer,
-          part.filename,
-          part.mimetype,
+          filename,
+          mimetype,
           folder,
           { story: storyMode },
         );
