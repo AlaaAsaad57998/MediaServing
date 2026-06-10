@@ -11,7 +11,8 @@ async function authHook(request, reply) {
     request.method === "OPTIONS" ||
     request.url.includes("/media/upload/") ||
     request.url.includes("/image/upload/") ||
-    request.url.includes("/video/upload/")
+    request.url.includes("/video/upload/") ||
+    request.url.includes("/file/upload/")
   )
     return;
 
