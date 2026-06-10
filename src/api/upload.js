@@ -76,6 +76,19 @@ const uploadRateLimit = {
   ),
 };
 
+// Bulk uploads are batched by clients (galleries, migrations) and legitimately
+// fire far more requests per window than single uploads, so they get a wider
+// allowance to avoid spurious 429s. Falls back to the single-upload window.
+const bulkUploadRateLimit = {
+  max: Number.parseInt(process.env.UPLOAD_BULK_RATE_LIMIT_MAX || "100", 10),
+  timeWindow: Number.parseInt(
+    process.env.UPLOAD_BULK_RATE_LIMIT_WINDOW_MS ||
+      process.env.UPLOAD_RATE_LIMIT_WINDOW_MS ||
+      "60000",
+    10,
+  ),
+};
+
 const STORY_VIDEO_MAX_SIZE_BYTES = 10 * 1024 * 1024;
 
 async function validateStoryVideoConstraints(buffer, filename, mimetype) {
@@ -207,7 +220,7 @@ async function uploadRoutes(fastify) {
     "/upload/bulk",
     {
       config: {
-        rateLimit: uploadRateLimit,
+        rateLimit: bulkUploadRateLimit,
       },
     },
     async (request, reply) => {

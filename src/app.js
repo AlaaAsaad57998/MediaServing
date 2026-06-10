@@ -306,7 +306,12 @@ function buildApp(opts = {}) {
     if (error.statusCode === 413) {
       return reply.code(413).send({ error: "File too large" });
     }
-
+    // @fastify/rate-limit throws the errorResponseBuilder payload (statusCode 429).
+    // Forward it as-is so the retry-after message survives; the onResponse hook
+    // logs it at "warn" like every other 4xx, so no explicit log is needed here.
+    if (error.statusCode === 429) {
+      return reply.code(429).send(error);
+    }
     request.log.error(
       {
         service: "media-serving",
