@@ -53,6 +53,42 @@ services:
     pids_limit: 400
     restart: unless-stopped
 
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: node src/worker.js
+    env_file:
+      - .env.development
+    environment:
+      NODE_ENV: development
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      REDIS_URL: redis://redis:6379
+      NODE_OPTIONS: --max-old-space-size=2048
+      VIDEO_PREPROCESS_CONCURRENCY: "4"
+      PREVIEW_DURATION_SECONDS: "6"
+      PREVIEW_VARIANT_TRANSFORM: w_400,h_600,f_mp4,vc_h264,q_65,c_fill
+      FFMPEG_X264_PRESET: superfast
+      FFMPEG_X265_PRESET: superfast
+      FFMPEG_THREADS: "2"
+      FFMPEG_VP9_DEADLINE: realtime
+      FFMPEG_VP9_CPU_USED: "6"
+    logging:
+      driver: loki
+      options:
+        <<: *loki-options
+        loki-external-labels: "container_name={{.Name}},env=development,stack=media-serving,role=worker"
+    depends_on:
+      - minio
+      - redis
+      - loki
+    volumes:
+      - ./src:/app/src
+      - ./.env.development:/app/.env.development:ro
+    restart: unless-stopped
+
   minio:
     image: minio/minio:latest
     ports:

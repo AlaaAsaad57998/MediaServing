@@ -71,3 +71,45 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: media-serving:latest
+    command: node src/worker.js
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+    env_file: .env.production
+
+    environment:
+      NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=2048
+      VIDEO_PREPROCESS_CONCURRENCY: "4"
+      PREVIEW_DURATION_SECONDS: "6"
+      PREVIEW_VARIANT_TRANSFORM: w_400,h_600,f_mp4,vc_h264,q_65,c_fill
+      FFMPEG_X264_PRESET: superfast
+      FFMPEG_X265_PRESET: superfast
+      FFMPEG_THREADS: "2"
+      FFMPEG_VP9_DEADLINE: realtime
+      FFMPEG_VP9_CPU_USED: "6"
+      LOKI_QUERY_URL: "${LOKI_QUERY_URL:-http://host.docker.internal:3100}"
+      GRAFANA_URL: "${GRAFANA_URL:-}"
+      GRAFANA_TOKEN: "${GRAFANA_TOKEN:-}"
+      GRAFANA_LOKI_UID: "P8E80F9AEF21F6940"
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    logging:
+      driver: loki
+      options:
+        <<: *loki-options
+        loki-external-labels: "container_name={{.Name}},env=production,stack=media-serving,role=worker"
+
+    mem_reservation: 512m
+    mem_limit: 2g
+    cpus: "1.00"
+    shm_size: 512m
+    pids_limit: 256

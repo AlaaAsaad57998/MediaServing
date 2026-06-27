@@ -38,4 +38,5 @@ EXPOSE 3000
 # Run as the built-in non-root node user
 USER node
 
+# The same image also runs the BullMQ worker — no separate build needed: `node src/worker.js`
 CMD ["dumb-init", "node", "src/index.js"]
