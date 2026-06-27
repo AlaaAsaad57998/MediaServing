@@ -37,6 +37,7 @@ const {
   storyVideoParams,
 } = require("../services/storyVideoService");
 const { enqueueVideoJob } = require("../services/videoQueue");
+const { fallbackServed } = require("../services/videoMetrics");
 
 function setMediaCacheHeaders(reply) {
   reply.header(
@@ -302,7 +303,13 @@ function stampLogExtra(
   // which filter `transformed=~"warm|cold"` — naturally exclude them,
   // preventing inflation of either counter.
   const transformedLabel =
-    cacheStatus === "HIT" ? "warm" : cacheStatus === "MISS" ? "cold" : "bypass";
+    cacheStatus === "HIT"
+      ? "warm"
+      : cacheStatus === "MISS"
+        ? "cold"
+        : cacheStatus === "PENDING"
+          ? "pending"
+          : "bypass";
 
   request._logExtra = {
     component: "TransformRoute",
@@ -648,6 +655,7 @@ async function transformRoutes(fastify) {
       const { buffer, contentType } = await getFromCache(fallbackKey, {
         range: range.kind === "partial" ? range.storageRange : undefined,
       });
+      fallbackServed.inc({ kind: fallbackKey === instantKey ? "instant" : "original" });
       stampLogExtra(request, { isVideo: true, filePath, cacheStatus: "PENDING", videoTarget: variantName });
       return sendVideoBuffer(reply, {
         buffer, contentType, variantName, cacheStatus: "PENDING", range, totalLength,

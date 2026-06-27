@@ -2,6 +2,7 @@ require("./config/env");
 const { Worker } = require("bullmq");
 const { QUEUE_NAME, createQueueConnection } = require("./services/videoQueue");
 const { generatePolishedVariants } = require("./services/videoJobs");
+const { jobsTotal, jobDuration } = require("./services/videoMetrics");
 
 // Minimal structured logger (pino-style JSON) — pino is not a direct dependency.
 const LEVELS = { trace: 10, debug: 20, info: 30, warn: 40, error: 50, fatal: 60 };
@@ -46,8 +47,17 @@ const worker = new Worker(
   async (job) => {
     const { originalKey, relativePath, story } = job.data;
     logger.info({ originalKey, story }, "Processing video job");
-    await generatePolishedVariants(originalKey, relativePath, { story }, logger);
-    logger.info({ originalKey }, "Video job complete");
+    const end = jobDuration.startTimer();
+    try {
+      await generatePolishedVariants(originalKey, relativePath, { story }, logger);
+      jobsTotal.inc({ result: "success" });
+      logger.info({ originalKey }, "Video job complete");
+    } catch (err) {
+      jobsTotal.inc({ result: "failure" });
+      throw err;
+    } finally {
+      end();
+    }
   },
   { connection: createQueueConnection(), concurrency },
 );
