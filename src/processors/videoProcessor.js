@@ -4,6 +4,7 @@ const path = require("path");
 const os = require("os");
 const crypto = require("crypto");
 const sharp = require("sharp");
+const { extractMediaInfo } = require("../utils/mediaProbe");
 
 const FFMPEG_BIN = process.env.FFMPEG_PATH || "ffmpeg";
 const FFPROBE_BIN = process.env.FFPROBE_PATH || "ffprobe";
@@ -530,9 +531,21 @@ async function probeDuration(inputBuffer) {
   }
 }
 
+async function probeMedia(inputBuffer) {
+  const inPath = tmpPath("src");
+  await fs.writeFile(inPath, inputBuffer);
+  try {
+    const json = await probe(inPath);
+    return extractMediaInfo(json);
+  } finally {
+    await cleanup(inPath);
+  }
+}
+
 module.exports = {
   processVideo,
   probeDuration,
+  probeMedia,
   extractSnapshot,
   extractRawFrame,
   probe,
