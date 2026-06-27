@@ -1,6 +1,7 @@
 async function authHook(request, reply) {
   // Skip auth for health check, test panel, compare page and CORS preflight requests
   if (
+    request.url === "/metrics" ||
     request.url === "/health" ||
     request.url === "/test" ||
     request.url === "/test.html" ||

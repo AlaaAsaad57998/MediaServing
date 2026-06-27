@@ -1,0 +1,14 @@
+[
+  {
+    "targets": [
+      "host.docker.internal:4001"
+    ],
+    "labels": {
+      "service": "media-serving",
+      "stack": "mediaserving",
+      "env": "staging",
+      "runtime": "nodejs",
+      "alert_email_group": "backend-team"
+    }
+  }
+]

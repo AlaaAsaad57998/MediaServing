@@ -6,6 +6,7 @@ const multipart = require("@fastify/multipart");
 const rateLimit = require("@fastify/rate-limit");
 const sharp = require("sharp");
 const { authHook } = require("./middleware/auth");
+const { registerMetrics } = require("./middleware/metrics");
 const uploadRoutes = require("./api/upload");
 const transformRoutes = require("./api/transform");
 const statsRoutes = require("./api/stats");
@@ -234,6 +235,11 @@ function buildApp(opts = {}) {
     );
     done();
   });
+
+  // Prometheus metrics: timing hooks + GET /metrics endpoint.
+  // Registered before the auth hook; /metrics is allowlisted in authHook so the
+  // central Prometheus can scrape it without an API key.
+  registerMetrics(app);
 
   // Global auth hook
   app.addHook("preHandler", authHook);
