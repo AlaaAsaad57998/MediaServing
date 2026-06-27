@@ -8,7 +8,7 @@ function buildJobOptions(originalKey) {
     attempts: Number.parseInt(process.env.VIDEO_JOB_ATTEMPTS || "3", 10) || 3,
     backoff: { type: "exponential", delay: 2000 },
     removeOnComplete: true,
-    removeOnFail: false,
+    removeOnFail: { age: Number.parseInt(process.env.VIDEO_JOB_FAIL_RETENTION_S || "86400", 10) || 86400 },
   };
 }
 
@@ -38,6 +38,9 @@ function getVideoQueue() {
   try {
     const { Queue } = require("bullmq");
     queue = new Queue(QUEUE_NAME, { connection: createQueueConnection() });
+    queue.on("error", (err) => {
+      console.warn(JSON.stringify({ level: "warn", component: "videoQueue", msg: "queue error", error: err?.message }));
+    });
   } catch {
     queue = null;
   }
@@ -54,11 +57,21 @@ async function enqueueVideoJob({ originalKey, relativePath, story }, logger) {
     return;
   }
   try {
-    await q.add(
-      "polish",
-      { originalKey, relativePath, story: story === true },
-      buildJobOptions(originalKey),
-    );
+    const ENQUEUE_TIMEOUT_MS =
+      Number.parseInt(process.env.VIDEO_ENQUEUE_TIMEOUT_MS || "3000", 10) || 3000;
+    await Promise.race([
+      q.add(
+        "polish",
+        { originalKey, relativePath, story: story === true },
+        buildJobOptions(originalKey),
+      ),
+      new Promise((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`enqueue timed out after ${ENQUEUE_TIMEOUT_MS}ms`)),
+          ENQUEUE_TIMEOUT_MS,
+        ),
+      ),
+    ]);
   } catch (err) {
     (logger || console).error(
       { originalKey, error: err.message },

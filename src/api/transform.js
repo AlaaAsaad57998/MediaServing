@@ -628,7 +628,11 @@ async function transformRoutes(fastify) {
       const instantKey = instantCacheKey(originalKey);
       const fallbackKey = (await checkCache(instantKey)) ? instantKey : originalKey;
 
-      // Warm the polished variant in the background (deduped by jobId).
+      // Warm the polished variant in the background. Enqueue is deduped by
+      // jobId (= originalKey): a job already queued/running collapses; a job
+      // that previously FAILED can only be re-created after its failure
+      // retention expires (see VIDEO_JOB_FAIL_RETENTION_S) — otherwise the
+      // backfill script (preprocess-videos) is the recovery path.
       enqueueVideoJob(
         { originalKey, relativePath: filePath, story: variantName.startsWith("story") },
         request.log,

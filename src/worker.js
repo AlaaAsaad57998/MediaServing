@@ -73,6 +73,10 @@ worker.on("failed", (job, err) => {
   );
 });
 
+worker.on("error", (err) => {
+  logger.error({ error: err?.message }, "Worker error");
+});
+
 async function shutdown(signal) {
   logger.info({ signal }, "Worker shutting down");
   await worker.close();

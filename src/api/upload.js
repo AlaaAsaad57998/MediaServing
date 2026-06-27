@@ -245,9 +245,11 @@ async function uploadRoutes(fastify) {
         }
 
         // Heavy polished variants go to the queue (non-blocking).
-        await enqueueVideoJob(
+        enqueueVideoJob(
           { originalKey: item.key, relativePath: item.key.replace(/^originals\//, ""), story: storyMode },
           request.log,
+        ).catch((err) =>
+          request.log.error({ s3_key: item.key, error: err.message }, "enqueue failed"),
         );
       }
 
@@ -401,9 +403,11 @@ async function uploadRoutes(fastify) {
         }
 
         // Always enqueue — even if posters/instant failed above.
-        await enqueueVideoJob(
+        enqueueVideoJob(
           { originalKey: item.key, relativePath: item.key.replace(/^originals\//, ""), story: storyMode },
           request.log,
+        ).catch((err) =>
+          request.log.error({ s3_key: item.key, error: err.message }, "enqueue failed"),
         );
       }
 
