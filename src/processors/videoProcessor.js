@@ -16,6 +16,10 @@ const FFMPEG_THREADS = Math.max(
   0,
   Number.parseInt(process.env.FFMPEG_THREADS || "2", 10) || 2,
 );
+const VIDEO_FFMPEG_TIMEOUT_MS = Math.max(
+  1000,
+  Number.parseInt(process.env.VIDEO_FFMPEG_TIMEOUT_MS || "120000", 10) || 120000,
+);
 const STORY_MP4_MAXRATE = process.env.STORY_MP4_MAXRATE || "1000k";
 const STORY_MP4_BUFSIZE = process.env.STORY_MP4_BUFSIZE || "2000k";
 const STORY_MP4_AUDIO_BITRATE = process.env.STORY_MP4_AUDIO_BITRATE || "48k";
@@ -261,221 +265,230 @@ function buildFilterChain(params, probeInfo, padColor) {
 async function processVideo(inputBuffer, params) {
   const inPath = tmpPath("src");
   await fs.writeFile(inPath, inputBuffer);
-
-  let probeInfo;
+  let outPath = null;
   try {
-    probeInfo = await probe(inPath);
-  } catch (err) {
-    await cleanup(inPath);
-    throw new Error(`Unable to probe video file: ${err.message}`);
-  }
-
-  const { container, ext, vcodec, acodec } = resolveCodecAndFormat(
-    params,
-    probeInfo,
-  );
-  const isStoryDelivery =
-    params.deliveryProfile === "story" ||
-    params.deliveryProfile === "story-fallback";
-  const isStoryFallbackDelivery = params.deliveryProfile === "story-fallback";
-  const outPath = tmpPath(ext);
-  const crf = resolveCrf(params, vcodec);
-
-  // Pad background colour
-  let padColor = null;
-  if ((params.c === "contain" || params.c === "pad") && params.b === "auto") {
+    let probeInfo;
     try {
-      padColor = await extractDominantColor(inPath);
-    } catch {
-      padColor = "black";
+      probeInfo = await probe(inPath);
+    } catch (err) {
+      throw new Error(`Unable to probe video file: ${err.message}`);
     }
-  } else if (params.b && params.b !== "auto") {
-    padColor = params.b.startsWith("#") ? `0x${params.b.slice(1)}` : params.b;
-  }
 
-  const filters = buildFilterChain(params, probeInfo, padColor);
-
-  // H.264 / H.265 with yuv420p require even pixel dimensions due to 4:2:0
-  // chroma subsampling. force_original_aspect_ratio=decrease (used by c_fit)
-  // can produce odd numbers (e.g. 354×629). Append a normalisation step that
-  // is a no-op for even dimensions and rounds odd ones down by 1 pixel.
-  if (vcodec === "libx264" || vcodec === "libx265") {
-    filters.push("scale=trunc(iw/2)*2:trunc(ih/2)*2");
-  }
-
-  // ── Build ffmpeg args ────────────────────────────────────────────────
-
-  const args = ["-y", "-hide_banner", "-loglevel", "error"];
-
-  // Trim: start offset
-  if (params.so != null) {
-    args.push("-ss", String(params.so));
-  }
-
-  args.push("-i", inPath);
-
-  // Trim: end offset
-  if (params.eo != null) {
-    if (params.so != null) {
-      // duration = eo - so
-      args.push("-t", String(params.eo - params.so));
-    } else {
-      args.push("-t", String(params.eo));
-    }
-  }
-
-  // Video codec
-  args.push("-c:v", vcodec);
-
-  // Codec-specific tuning for fast decode / smooth playback
-  if (vcodec === "libx264") {
-    const maxRate = isStoryDelivery
-      ? isStoryFallbackDelivery
-        ? STORY_FALLBACK_MP4_MAXRATE
-        : STORY_MP4_MAXRATE
-      : "2500k";
-    const bufSize = isStoryDelivery
-      ? isStoryFallbackDelivery
-        ? STORY_FALLBACK_MP4_BUFSIZE
-        : STORY_MP4_BUFSIZE
-      : "5000k";
-    const profile = isStoryDelivery ? "main" : "high";
-    const level = isStoryDelivery ? "3.1" : "4.1";
-    args.push(
-      "-preset",
-      FFMPEG_X264_PRESET,
-      "-tune",
-      "fastdecode",
-      "-profile:v",
-      profile,
-      "-level",
-      level,
-      "-crf",
-      String(crf),
-      "-pix_fmt",
-      "yuv420p", // maximum compatibility
-      "-maxrate",
-      maxRate,
-      "-bufsize",
-      bufSize,
+    const { container, ext, vcodec, acodec } = resolveCodecAndFormat(
+      params,
+      probeInfo,
     );
+    const isStoryDelivery =
+      params.deliveryProfile === "story" ||
+      params.deliveryProfile === "story-fallback";
+    const isStoryFallbackDelivery = params.deliveryProfile === "story-fallback";
+    outPath = tmpPath(ext);
+    const crf = resolveCrf(params, vcodec);
 
-    if (isStoryDelivery) {
-      // Story playback benefits from stable frame cadence and frequent keyframes.
-      args.push(
-        "-r",
-        "30",
-        "-g",
-        "60",
-        "-keyint_min",
-        "60",
-        "-sc_threshold",
-        "0",
-      );
-    }
-  } else if (vcodec === "libx265") {
-    args.push(
-      "-preset",
-      FFMPEG_X265_PRESET,
-      "-crf",
-      String(crf),
-      "-pix_fmt",
-      "yuv420p",
-      "-tag:v",
-      "hvc1", // Apple compatibility
-    );
-  } else if (vcodec === "libvpx-vp9") {
-    args.push(
-      "-crf",
-      String(crf),
-      "-b:v",
-      "0", // constant-quality mode
-      "-deadline",
-      FFMPEG_VP9_DEADLINE,
-      "-cpu-used",
-      FFMPEG_VP9_CPU_USED,
-      "-row-mt",
-      "1", // multi-threaded row encoding
-      "-tile-columns",
-      "2",
-    );
-  }
-
-  if (FFMPEG_THREADS > 0) {
-    args.push("-threads", String(FFMPEG_THREADS));
-  }
-
-  // Audio codec
-  const hasAudio = (probeInfo.streams || []).some(
-    (s) => s.codec_type === "audio",
-  );
-  if (hasAudio) {
-    args.push("-c:a", acodec);
-    if (acodec === "aac") {
-      args.push(
-        "-b:a",
-        isStoryDelivery
-          ? isStoryFallbackDelivery
-            ? STORY_FALLBACK_MP4_AUDIO_BITRATE
-            : STORY_MP4_AUDIO_BITRATE
-          : "96k",
-      );
-    } else if (acodec === "libopus") {
-      args.push("-b:a", "64k");
-    }
-  } else {
-    args.push("-an");
-  }
-
-  // Video filters
-  if (filters.length > 0) {
-    args.push("-vf", filters.join(","));
-  }
-
-  // fl_lossy → push CRF higher (lower quality, smaller file)
-  // Already handled via params.q mapping; no extra action needed.
-
-  // Fast start: move moov atom to the beginning for instant playback
-  if (container === "mp4") {
-    args.push("-movflags", "+faststart");
-  }
-
-  args.push(outPath);
-
-  // ── Run ffmpeg ───────────────────────────────────────────────────────
-
-  await new Promise((resolve, reject) => {
-    const proc = spawn(FFMPEG_BIN, args, {
-      stdio: ["ignore", "ignore", "pipe"],
-    });
-    const stderr = [];
-    proc.stderr.on("data", (d) => stderr.push(d));
-    proc.on("close", (code, signal) => {
-      if (code !== 0 || code === null) {
-        const msg = Buffer.concat(stderr).toString().slice(0, 500);
-        if (signal) {
-          // Killed by OS — most likely SIGKILL from Docker OOM.
-          return reject(
-            new Error(
-              `ffmpeg killed by signal ${signal} (likely out-of-memory). ` +
-                `Consider increasing container memory or reducing concurrency. stderr: ${msg}`,
-            ),
-          );
-        }
-        return reject(new Error(`ffmpeg exited ${code}: ${msg}`));
+    // Pad background colour
+    let padColor = null;
+    if ((params.c === "contain" || params.c === "pad") && params.b === "auto") {
+      try {
+        padColor = await extractDominantColor(inPath);
+      } catch {
+        padColor = "black";
       }
-      resolve();
+    } else if (params.b && params.b !== "auto") {
+      padColor = params.b.startsWith("#") ? `0x${params.b.slice(1)}` : params.b;
+    }
+
+    const filters = buildFilterChain(params, probeInfo, padColor);
+
+    // H.264 / H.265 with yuv420p require even pixel dimensions due to 4:2:0
+    // chroma subsampling. force_original_aspect_ratio=decrease (used by c_fit)
+    // can produce odd numbers (e.g. 354×629). Append a normalisation step that
+    // is a no-op for even dimensions and rounds odd ones down by 1 pixel.
+    if (vcodec === "libx264" || vcodec === "libx265") {
+      filters.push("scale=trunc(iw/2)*2:trunc(ih/2)*2");
+    }
+
+    // ── Build ffmpeg args ────────────────────────────────────────────────
+
+    const args = ["-y", "-hide_banner", "-loglevel", "error"];
+
+    // Trim: start offset
+    if (params.so != null) {
+      args.push("-ss", String(params.so));
+    }
+
+    args.push("-i", inPath);
+
+    // Trim: end offset
+    if (params.eo != null) {
+      if (params.so != null) {
+        // duration = eo - so
+        args.push("-t", String(params.eo - params.so));
+      } else {
+        args.push("-t", String(params.eo));
+      }
+    }
+
+    // Video codec
+    args.push("-c:v", vcodec);
+
+    // Codec-specific tuning for fast decode / smooth playback
+    if (vcodec === "libx264") {
+      const maxRate = isStoryDelivery
+        ? isStoryFallbackDelivery
+          ? STORY_FALLBACK_MP4_MAXRATE
+          : STORY_MP4_MAXRATE
+        : "2500k";
+      const bufSize = isStoryDelivery
+        ? isStoryFallbackDelivery
+          ? STORY_FALLBACK_MP4_BUFSIZE
+          : STORY_MP4_BUFSIZE
+        : "5000k";
+      const profile = isStoryDelivery ? "main" : "high";
+      const level = isStoryDelivery ? "3.1" : "4.1";
+      args.push(
+        "-preset",
+        FFMPEG_X264_PRESET,
+        "-tune",
+        "fastdecode",
+        "-profile:v",
+        profile,
+        "-level",
+        level,
+        "-crf",
+        String(crf),
+        "-pix_fmt",
+        "yuv420p", // maximum compatibility
+        "-maxrate",
+        maxRate,
+        "-bufsize",
+        bufSize,
+      );
+
+      if (isStoryDelivery) {
+        // Story playback benefits from stable frame cadence and frequent keyframes.
+        args.push(
+          "-r",
+          "30",
+          "-g",
+          "60",
+          "-keyint_min",
+          "60",
+          "-sc_threshold",
+          "0",
+        );
+      }
+    } else if (vcodec === "libx265") {
+      args.push(
+        "-preset",
+        FFMPEG_X265_PRESET,
+        "-crf",
+        String(crf),
+        "-pix_fmt",
+        "yuv420p",
+        "-tag:v",
+        "hvc1", // Apple compatibility
+      );
+    } else if (vcodec === "libvpx-vp9") {
+      args.push(
+        "-crf",
+        String(crf),
+        "-b:v",
+        "0", // constant-quality mode
+        "-deadline",
+        FFMPEG_VP9_DEADLINE,
+        "-cpu-used",
+        FFMPEG_VP9_CPU_USED,
+        "-row-mt",
+        "1", // multi-threaded row encoding
+        "-tile-columns",
+        "2",
+      );
+    }
+
+    if (FFMPEG_THREADS > 0) {
+      args.push("-threads", String(FFMPEG_THREADS));
+    }
+
+    // Audio codec
+    const hasAudio = (probeInfo.streams || []).some(
+      (s) => s.codec_type === "audio",
+    );
+    if (hasAudio) {
+      args.push("-c:a", acodec);
+      if (acodec === "aac") {
+        args.push(
+          "-b:a",
+          isStoryDelivery
+            ? isStoryFallbackDelivery
+              ? STORY_FALLBACK_MP4_AUDIO_BITRATE
+              : STORY_MP4_AUDIO_BITRATE
+            : "96k",
+        );
+      } else if (acodec === "libopus") {
+        args.push("-b:a", "64k");
+      }
+    } else {
+      args.push("-an");
+    }
+
+    // Video filters
+    if (filters.length > 0) {
+      args.push("-vf", filters.join(","));
+    }
+
+    // fl_lossy → push CRF higher (lower quality, smaller file)
+    // Already handled via params.q mapping; no extra action needed.
+
+    // Fast start: move moov atom to the beginning for instant playback
+    if (container === "mp4") {
+      args.push("-movflags", "+faststart");
+    }
+
+    args.push(outPath);
+
+    // ── Run ffmpeg ───────────────────────────────────────────────────────
+
+    await new Promise((resolve, reject) => {
+      const proc = spawn(FFMPEG_BIN, args, { stdio: ["ignore", "ignore", "pipe"] });
+      const stderr = [];
+      let timedOut = false;
+      const killTimer = setTimeout(() => {
+        timedOut = true;
+        proc.kill("SIGKILL");
+      }, VIDEO_FFMPEG_TIMEOUT_MS);
+      proc.stderr.on("data", (d) => stderr.push(d));
+      proc.on("close", (code, signal) => {
+        clearTimeout(killTimer);
+        if (timedOut) {
+          return reject(new Error(`ffmpeg timed out after ${VIDEO_FFMPEG_TIMEOUT_MS}ms and was killed`));
+        }
+        if (code !== 0 || code === null) {
+          const msg = Buffer.concat(stderr).toString().slice(0, 500);
+          if (signal) {
+            return reject(
+              new Error(
+                `ffmpeg killed by signal ${signal} (likely out-of-memory). ` +
+                  `Consider increasing container memory or reducing concurrency. stderr: ${msg}`,
+              ),
+            );
+          }
+          return reject(new Error(`ffmpeg exited ${code}: ${msg}`));
+        }
+        resolve();
+      });
+      proc.on("error", (err) => {
+        clearTimeout(killTimer);
+        reject(err);
+      });
     });
-    proc.on("error", reject);
-  });
 
-  // Read output
-  const outputBuffer = await fs.readFile(outPath);
-  await cleanup(inPath, outPath);
-
-  const contentType = container === "webm" ? "video/webm" : "video/mp4";
-
-  return { buffer: outputBuffer, contentType };
+    // Read output
+    const outputBuffer = await fs.readFile(outPath);
+    const contentType = container === "webm" ? "video/webm" : "video/mp4";
+    return { buffer: outputBuffer, contentType };
+  } finally {
+    await cleanup(inPath, ...(outPath ? [outPath] : []));
+  }
 }
 
 async function extractSnapshot(inputBuffer, timeSec = 1) {
