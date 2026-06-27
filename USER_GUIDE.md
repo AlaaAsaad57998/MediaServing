@@ -81,7 +81,7 @@ If you upload with `?story=true`, the response also includes a `story` section:
   "story": {
     "enabled": true,
     "variants": {
-      "hls": "/video/upload/stories/1712345678456.mp4?target=story",
+      "story": "/video/upload/stories/1712345678456.mp4?target=story",
       "fallback": "/video/upload/stories/1712345678456.mp4?target=story-fallback"
     }
   }
@@ -121,7 +121,7 @@ const res = await fetch("https://media_server.ramaaz.dev/upload?story=true", {
 });
 
 const data = await res.json();
-console.log(data.story?.variants?.hls);
+console.log(data.story?.variants?.story);
 ```
 
 **cURL**
@@ -328,8 +328,8 @@ GET /video/upload/<file-path>?target=<variant>
 | _(omitted)_      | **Full quality** video — best for main playback           | MP4    | 1280×630       |
 | `preview`        | **Short preview** — first 10 seconds in smaller size      | WebM   | 400×600        |
 | `snapshot`       | **Thumbnail image** — a single frame captured at 1 second | WebP   | —              |
-| `story`          | **Story HLS manifest** (ABR-style playlists/segments)     | HLS    | 360p/540p/720p |
-| `story-fallback` | **Story MP4 fallback** for clients without HLS support    | MP4    | 720×1280       |
+| `story`          | **Story vertical MP4** — optimised for portrait playback  | MP4    | 540×960        |
+| `story-fallback` | **Story MP4 fallback** — lower-bitrate portrait MP4       | MP4    | 720×1280       |
 
 ### Video URL Examples
 
@@ -374,14 +374,9 @@ https://media_server.ramaaz.dev/video/upload/clips/video.mp4?target=snapshot
 
 > **Video upload response:** video items also include `durationSeconds`, which is the probed media duration in seconds.
 
-### StoryViewer Integration (HLS First, MP4 Fallback)
+### StoryViewer Integration (MP4)
 
-For story playback clients, use this order:
-
-1. Use `story.variants.hls` when available (or derive `?target=story` from the base video URL).
-2. Use native HLS on Safari/iOS via `video.canPlayType("application/vnd.apple.mpegurl")`.
-3. Use `hls.js` on browsers without native HLS support.
-4. If HLS fails (fatal error), switch to `story.variants.fallback` (or `?target=story-fallback`).
+Story variants are vertical MP4 files served directly — no HLS/adaptive logic required. Play `?target=story` directly in a `<video>` element. Use `?target=story-fallback` as a lower-bitrate alternative.
 
 Recommended client story object shapes:
 
@@ -400,7 +395,7 @@ Recommended client story object shapes:
   "story": {
     "enabled": true,
     "variants": {
-      "hls": "/video/upload/stories/1712345678456.mp4?target=story",
+      "story": "/video/upload/stories/1712345678456.mp4?target=story",
       "fallback": "/video/upload/stories/1712345678456.mp4?target=story-fallback"
     }
   }
@@ -421,7 +416,7 @@ Use `POST /upload?story=true` (or `/upload/bulk?story=true`) for video stories s
 | Serve full video           | GET    | `/video/upload/...`                       | ❌ No         |
 | Serve video preview clip   | GET    | `/video/upload/...?target=preview`        | ❌ No         |
 | Serve video snapshot/thumb | GET    | `/video/upload/...?target=snapshot`       | ❌ No         |
-| Serve story HLS manifest   | GET    | `/video/upload/...?target=story`          | ❌ No         |
+| Serve story vertical MP4   | GET    | `/video/upload/...?target=story`          | ❌ No         |
 | Serve story MP4 fallback   | GET    | `/video/upload/...?target=story-fallback` | ❌ No         |
 
 ---
@@ -497,7 +492,7 @@ const base = "https://media_server.ramaaz.dev";
 // <video poster={base + result.variants.snapshot} src={base + result.variants.full} controls />
 ```
 
-### Application — Upload story video and play with HLS + fallback
+### Application — Upload story video and play with MP4 + fallback
 
 ```js
 const form = new FormData();
@@ -514,9 +509,9 @@ const result = await fetch(
 ).then((r) => r.json());
 
 const base = "https://media_server.ramaaz.dev";
-const hlsUrl = base + result.story.variants.hls;
+const storyUrl = base + result.story.variants.story;
 const fallbackUrl = base + result.story.variants.fallback;
 const durationSeconds = result.durationSeconds;
 
-// StoryViewer should prefer hlsUrl and switch to fallbackUrl if HLS is unavailable/fails.
+// Play storyUrl in a <video> element. Use fallbackUrl as a lower-bitrate alternative.
 ```

@@ -362,8 +362,7 @@
         <div class="toggle-row">
           <input type="checkbox" id="storyModeCheck" />
           <label for="storyModeCheck"
-            >Story mode — generates HLS adaptive renditions (360p / 540p / 720p)
-            and MP4 fallback</label
+            >Story mode — generates vertical MP4 story and MP4 fallback</label
           >
         </div>
         <button
@@ -408,7 +407,7 @@
           </div>
           <div class="story-info">
             <div class="story-btns">
-              <button onclick="playStory('hls')">▶ Play HLS (adaptive)</button>
+              <button onclick="playStory('story')">▶ Play Story MP4</button>
               <button class="btn-alt" onclick="playStory('fallback')">
                 ▶ Play MP4 fallback
               </button>
@@ -444,7 +443,7 @@
               <option value="">full</option>
               <option value="preview">preview</option>
               <option value="snapshot">snapshot</option>
-              <option value="story">story (HLS master)</option>
+              <option value="story">story (vertical MP4)</option>
               <option value="story-fallback">story-fallback (MP4)</option>
             </select>
           </div>
@@ -509,8 +508,8 @@
 
         if (story && story.enabled && story.variants) {
           html +=
-            "<br>4. story HLS (adaptive): " +
-            (getBase() + story.variants.hls) +
+            "<br>4. story (vertical MP4): " +
+            (getBase() + (story.variants.story || story.variants.hls || "")) +
             "<br>5. story fallback (MP4): " +
             (getBase() + story.variants.fallback);
         }
@@ -617,7 +616,7 @@
             getBase() + "/upload" + (storyMode ? "?story=true" : "");
 
           btn.textContent = storyMode
-            ? "Uploading & generating story HLS (this may take a minute)…"
+            ? "Uploading & generating story MP4 (this may take a minute)…"
             : "Uploading & processing…";
 
           const res = await fetch(uploadUrl, {
@@ -758,25 +757,8 @@
 
       // ── Story Player ─────────────────────────────────────────────────────
 
-      let hlsInstance = null;
-
-      function loadHlsJs(cb) {
-        if (window.Hls) {
-          cb();
-          return;
-        }
-        const s = document.createElement("script");
-        s.src = "https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js";
-        s.onload = cb;
-        document.head.appendChild(s);
-      }
-
       function stopStory() {
         const vid = document.getElementById("storyVideo");
-        if (hlsInstance) {
-          hlsInstance.destroy();
-          hlsInstance = null;
-        }
         vid.pause();
         vid.removeAttribute("src");
         vid.load();
@@ -810,103 +792,15 @@
         const vid = document.getElementById("storyVideo");
         vid.poster = posterUrl;
 
-        if (mode === "fallback") {
-          const src =
-            base + "/video/upload/" + publicId + "?target=story-fallback";
-          vid.src = src;
-          vid.play().catch(() => {});
-          setStoryStatus("Playing MP4 fallback…");
-          document.getElementById("storyMeta").textContent = src;
-          return;
-        }
-
-        // HLS mode
-        const manifestUrl =
-          base + "/video/upload/" + publicId + "?target=story";
-        setStoryStatus("Loading hls.js…");
-
-        if (window.Hls && Hls.isSupported()) {
-          // hls.js already available — use it directly
-          _attachHls(vid, manifestUrl);
-        } else {
-          loadHlsJs(function () {
-            if (!window.Hls) {
-              setStoryStatus("hls.js failed to load — try fallback.");
-              return;
-            }
-            if (Hls.isSupported()) {
-              _attachHls(vid, manifestUrl);
-            } else if (vid.canPlayType("application/vnd.apple.mpegurl")) {
-              vid.src = manifestUrl;
-              vid.play().catch(() => {});
-              setStoryStatus("Playing via native HLS (Safari)…");
-              document.getElementById("storyMeta").textContent = manifestUrl;
-            } else {
-              setStoryStatus("HLS not supported — switching to MP4 fallback.");
-              playStory("fallback");
-            }
-          });
-        }
+        const target = mode === "fallback" ? "story-fallback" : "story";
+        const src = base + "/video/upload/" + publicId + "?target=" + target;
+        vid.src = src;
+        vid.play().catch(() => {});
+        setStoryStatus(
+          mode === "fallback" ? "Playing MP4 fallback…" : "Playing story MP4…",
+        );
+        document.getElementById("storyMeta").textContent = src;
       }
-
-      function _attachHls(vid, manifestUrl) {
-        const hls = new Hls({
-          startLevel: -1,
-          abrEwmaFastLive: 3,
-          abrEwmaSlowLive: 9,
-          maxBufferLength: 20,
-          maxMaxBufferLength: 60,
-        });
-        hlsInstance = hls;
-        hls.loadSource(manifestUrl);
-        hls.attachMedia(vid);
-
-        const badge = document.getElementById("storyQualityBadge");
-        const meta = document.getElementById("storyMeta");
-
-        hls.on(Hls.Events.MANIFEST_PARSED, function (_, data) {
-          setStoryStatus(
-            "Manifest parsed — " +
-              data.levels.length +
-              " quality levels. Buffering…",
-          );
-          vid.play().catch(() => {});
-          badge.style.display = "block";
-        });
-
-        hls.on(Hls.Events.LEVEL_SWITCHED, function (_, data) {
-          const lvl = hls.levels[data.level];
-          if (!lvl) return;
-          badge.textContent =
-            lvl.height + "p · " + Math.round(lvl.bitrate / 1000) + " kbps";
-          meta.textContent =
-            "Level " +
-            data.level +
-            " | " +
-            lvl.width +
-            "x" +
-            lvl.height +
-            " | " +
-            Math.round(lvl.bitrate / 1000) +
-            " kbps | src: " +
-            manifestUrl;
-        });
-
-        hls.on(Hls.Events.ERROR, function (_, data) {
-          if (data.fatal) {
-            setStoryStatus(
-              "HLS fatal error: " + data.type + " — " + data.details,
-            );
-            hls.destroy();
-            hlsInstance = null;
-          }
-        });
-
-        setStoryStatus("Fetching manifest…");
-      }
-
-      // Eager-load hls.js so first play is instant
-      loadHlsJs(function () {});
 
       function bindPreviewEvents() {
         [
