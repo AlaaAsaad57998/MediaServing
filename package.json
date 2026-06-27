@@ -12,7 +12,8 @@
     "preprocess-videos": "node src/scripts/preprocess-videos.js",
     "preprocess-videos:dry": "node src/scripts/preprocess-videos.js --dry-run",
     "fetch-video": "node src/scripts/fetch-and-upload.js",
-    "fetch-video:story": "node src/scripts/fetch-and-upload.js --story --folder stories"
+    "fetch-video:story": "node src/scripts/fetch-and-upload.js --story --folder stories",
+    "worker": "cross-env NODE_ENV=production node src/worker.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.800.0",
@@ -20,6 +21,7 @@
     "@fastify/cors": "^10.1.0",
     "@fastify/multipart": "^9.0.0",
     "@fastify/rate-limit": "^10.1.0",
+    "bullmq": "^5.79.1",
     "cross-env": "^7.0.3",
     "dotenv": "^16.5.0",
     "fastify": "^5.3.3",
