@@ -3,11 +3,28 @@ const path = require("path");
 const mime = require("mime-types");
 const { isVideoFile } = require("../utils/paramParser");
 const {
-  preprocessVideo,
   getVariantUrls,
+  snapshotCacheKey,
+  webpCacheKey,
+  SNAPSHOT_SECOND,
+  instantCacheKey,
+  createInstantVariant,
+  createWebpPosterVariant,
 } = require("../services/videoPreprocessor");
 const { getStoryUrls } = require("../services/storyVideoService");
-const { probeDuration } = require("../processors/videoProcessor");
+const { probeMedia, extractSnapshot } = require("../processors/videoProcessor");
+const { isWebPlayable } = require("../utils/mediaProbe");
+const { checkCache, saveToCache } = require("../services/cacheService");
+const { enqueueVideoJob } = require("../services/videoQueue");
+
+const IMAGE_MAX_MB = Number.parseInt(process.env.IMAGE_MAX_FILE_SIZE_MB || "10", 10) || 10;
+const VIDEO_MAX_MB = Number.parseInt(process.env.VIDEO_MAX_FILE_SIZE_MB || "10", 10) || 10;
+const MAX_VIDEO_DURATION_SECONDS = Number.parseInt(process.env.MAX_VIDEO_DURATION_SECONDS || "60", 10) || 60;
+const MEDIA_MULTIPART_LIMIT_BYTES = Math.max(IMAGE_MAX_MB, VIDEO_MAX_MB) * 1024 * 1024;
+
+function maxBytesForType(resourceType) {
+  return (resourceType === "video" ? VIDEO_MAX_MB : IMAGE_MAX_MB) * 1024 * 1024;
+}
 
 function isTrueLike(value) {
   if (Array.isArray(value)) return isTrueLike(value[0]);
@@ -106,14 +123,9 @@ async function validateStoryVideoConstraints(buffer, filename, mimetype) {
   return { ok: true, durationSeconds: null };
 }
 
-const maxFileSize =
-  Number.parseInt(process.env.UPLOAD_MAX_FILE_SIZE_MB || "120", 10) *
-  1024 *
-  1024;
-
 const bulkMultipartLimits = {
   files: Number.parseInt(process.env.UPLOAD_BULK_MAX_FILES || "50", 10),
-  fileSize: maxFileSize,
+  fileSize: MEDIA_MULTIPART_LIMIT_BYTES,
 };
 
 async function uploadRoutes(fastify) {
@@ -131,17 +143,24 @@ async function uploadRoutes(fastify) {
       // of whether it appears before or after the file in the stream.
       const collectedFields = {};
       let filePart = null;
-      for await (const part of request.parts({ limits: { fileSize: maxFileSize } })) {
-        if (part.type === "field") {
-          collectedFields[part.fieldname] =
-            typeof part.value === "string"
-              ? part.value
-              : String(part.value ?? "");
-        } else if (part.type === "file" && filePart === null) {
-          filePart = { buffer: await part.toBuffer(), filename: part.filename, mimetype: part.mimetype };
-        } else if (part.type === "file") {
-          await part.toBuffer(); // drain unexpected extra files
+      try {
+        for await (const part of request.parts({ limits: { fileSize: MEDIA_MULTIPART_LIMIT_BYTES } })) {
+          if (part.type === "field") {
+            collectedFields[part.fieldname] =
+              typeof part.value === "string"
+                ? part.value
+                : String(part.value ?? "");
+          } else if (part.type === "file" && filePart === null) {
+            filePart = { buffer: await part.toBuffer(), filename: part.filename, mimetype: part.mimetype };
+          } else if (part.type === "file") {
+            await part.toBuffer(); // drain unexpected extra files
+          }
         }
+      } catch (err) {
+        if (err.code === "FST_REQ_FILE_TOO_LARGE") {
+          return reply.code(413).send({ error: "File exceeds the size limit" });
+        }
+        throw err;
       }
 
       if (!filePart) {
@@ -152,6 +171,14 @@ async function uploadRoutes(fastify) {
 
       if (buffer.length === 0) {
         return reply.code(400).send({ error: "Uploaded file is empty" });
+      }
+
+      // Per-type size check after buffering.
+      const detectedType = isVideoFile(dataFilename, dataMimetype) ? "video" : "image";
+      if (buffer.length > maxBytesForType(detectedType)) {
+        return reply.code(413).send({
+          error: `${detectedType} exceeds the ${detectedType === "video" ? VIDEO_MAX_MB : IMAGE_MAX_MB} MB limit`,
+        });
       }
 
       let storyVideoDurationSeconds = null;
@@ -178,32 +205,50 @@ async function uploadRoutes(fastify) {
       );
 
       if (item.type === "video") {
-        item.durationSeconds =
-          storyVideoDurationSeconds ??
-          (await probeDuration(buffer).catch(() => 0));
+        let info;
         try {
-          await preprocessVideo(
-            item.key,
-            item.key.replace(/^originals\//, ""),
-            request.log,
-            { story: storyMode },
-          );
+          info = await probeMedia(buffer);
         } catch (err) {
-          request.log.error(
-            {
-              service: "media-serving",
-              component: "UploadRoute",
-              env: process.env.NODE_ENV,
-              request_id: request.id,
-              url: request.url,
-              s3_key: item.key,
-              exception: err.constructor?.name || "Error",
-              error_message: err.message,
-            },
-            "Video preprocessing failed",
-          );
-          return reply.code(500).send({ error: "Video processing failed" });
+          return reply.code(400).send({ error: "Unreadable video file" });
         }
+        if (info.durationSeconds > MAX_VIDEO_DURATION_SECONDS) {
+          return reply.code(400).send({
+            error: `Video duration must be ${MAX_VIDEO_DURATION_SECONDS}s or less`,
+          });
+        }
+        item.durationSeconds = info.durationSeconds;
+
+        // Synchronous, cheap: posters (needed immediately by image targets).
+        try {
+          const snapKey = snapshotCacheKey(item.key);
+          if (!(await checkCache(snapKey))) {
+            const snap = await extractSnapshot(buffer, SNAPSHOT_SECOND);
+            await saveToCache(snapKey, snap.buffer, snap.contentType);
+          }
+          const posterKey = webpCacheKey(item.key);
+          if (!(await checkCache(posterKey))) {
+            const poster = await createWebpPosterVariant(buffer);
+            await saveToCache(posterKey, poster.buffer, poster.contentType);
+          }
+        } catch (err) {
+          request.log.error({ s3_key: item.key, error: err.message }, "Poster generation failed");
+        }
+
+        // Synchronous only when the source won't play in a browser as-is.
+        if (!isWebPlayable(info)) {
+          try {
+            const instant = await createInstantVariant(buffer);
+            await saveToCache(instantCacheKey(item.key), instant.buffer, instant.contentType);
+          } catch (err) {
+            request.log.error({ s3_key: item.key, error: err.message }, "Instant variant generation failed");
+          }
+        }
+
+        // Heavy polished variants go to the queue (non-blocking).
+        await enqueueVideoJob(
+          { originalKey: item.key, relativePath: item.key.replace(/^originals\//, ""), story: storyMode },
+          request.log,
+        );
       }
 
       request._logExtra = {
@@ -230,36 +275,53 @@ async function uploadRoutes(fastify) {
       // of whether it appears before or after the files in the stream.
       const collectedFields = {};
       const collectedFiles = [];
-      for await (const part of request.parts({
-        limits: bulkMultipartLimits,
-      })) {
-        if (part.type === "field") {
-          collectedFields[part.fieldname] =
-            typeof part.value === "string"
-              ? part.value
-              : String(part.value ?? "");
-          continue;
+      try {
+        for await (const part of request.parts({
+          limits: bulkMultipartLimits,
+        })) {
+          if (part.type === "field") {
+            collectedFields[part.fieldname] =
+              typeof part.value === "string"
+                ? part.value
+                : String(part.value ?? "");
+            continue;
+          }
+
+          if (part.type !== "file") {
+            continue;
+          }
+
+          const buffer = await part.toBuffer();
+
+          if (buffer.length === 0) {
+            return reply
+              .code(400)
+              .send({ error: "One or more uploaded files are empty" });
+          }
+
+          collectedFiles.push({ buffer, filename: part.filename, mimetype: part.mimetype });
         }
-
-        if (part.type !== "file") {
-          continue;
+      } catch (err) {
+        if (err.code === "FST_REQ_FILE_TOO_LARGE") {
+          return reply.code(413).send({ error: "File exceeds the size limit" });
         }
-
-        const buffer = await part.toBuffer();
-
-        if (buffer.length === 0) {
-          return reply
-            .code(400)
-            .send({ error: "One or more uploaded files are empty" });
-        }
-
-        collectedFiles.push({ buffer, filename: part.filename, mimetype: part.mimetype });
+        throw err;
       }
 
       const folder = collectedFields.folder || "";
       const items = [];
+      // Keep per-file buffers in sync with items for video processing below.
+      const fileBuffers = [];
 
       for (const { buffer, filename, mimetype } of collectedFiles) {
+        // Per-type size check after buffering.
+        const detectedType = isVideoFile(filename, mimetype) ? "video" : "image";
+        if (buffer.length > maxBytesForType(detectedType)) {
+          return reply.code(413).send({
+            error: `${detectedType} exceeds the ${detectedType === "video" ? VIDEO_MAX_MB : IMAGE_MAX_MB} MB limit`,
+          });
+        }
+
         let storyVideoDurationSeconds = null;
         if (storyMode) {
           const validation = await validateStoryVideoConstraints(
@@ -282,46 +344,67 @@ async function uploadRoutes(fastify) {
         );
 
         if (item.type === "video") {
-          item.durationSeconds =
-            storyVideoDurationSeconds ??
-            (await probeDuration(buffer).catch(() => 0));
+          let info;
+          try {
+            info = await probeMedia(buffer);
+          } catch {
+            return reply.code(400).send({ error: "Unreadable video file" });
+          }
+          if (info.durationSeconds > MAX_VIDEO_DURATION_SECONDS) {
+            return reply.code(400).send({
+              error: `Video duration must be ${MAX_VIDEO_DURATION_SECONDS}s or less`,
+            });
+          }
+          item.durationSeconds = info.durationSeconds;
+          item._info = info; // stash for post-loop processing
         }
 
         items.push(item);
+        fileBuffers.push(buffer);
       }
 
       if (items.length === 0) {
         return reply.code(400).send({ error: "At least one file is required" });
       }
 
-      const videoItems = items.filter((i) => i.type === "video");
-      if (videoItems.length > 0) {
-        const results = await Promise.allSettled(
-          videoItems.map((i) =>
-            preprocessVideo(
-              i.key,
-              i.key.replace(/^originals\//, ""),
-              request.log,
-              { story: storyMode },
-            ),
-          ),
-        );
-        const failed = results.find((r) => r.status === "rejected");
-        if (failed) {
-          request.log.error(
-            {
-              service: "media-serving",
-              component: "UploadRoute",
-              env: process.env.NODE_ENV,
-              request_id: request.id,
-              url: request.url,
-              exception: failed.reason?.constructor?.name || "Error",
-              error_message: failed.reason?.message,
-            },
-            "Video preprocessing failed during bulk upload",
-          );
-          return reply.code(500).send({ error: "Video processing failed" });
+      // Per-video: cheap poster + instant (failures are non-fatal per file),
+      // then enqueue heavy polished variants.
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.type !== "video") continue;
+        const buffer = fileBuffers[i];
+        const info = item._info;
+        delete item._info; // remove internal stash before response
+
+        try {
+          const snapKey = snapshotCacheKey(item.key);
+          if (!(await checkCache(snapKey))) {
+            const snap = await extractSnapshot(buffer, SNAPSHOT_SECOND);
+            await saveToCache(snapKey, snap.buffer, snap.contentType);
+          }
+          const posterKey = webpCacheKey(item.key);
+          if (!(await checkCache(posterKey))) {
+            const poster = await createWebpPosterVariant(buffer);
+            await saveToCache(posterKey, poster.buffer, poster.contentType);
+          }
+        } catch (err) {
+          request.log.error({ s3_key: item.key, error: err.message }, "Poster generation failed");
         }
+
+        if (!isWebPlayable(info)) {
+          try {
+            const instant = await createInstantVariant(buffer);
+            await saveToCache(instantCacheKey(item.key), instant.buffer, instant.contentType);
+          } catch (err) {
+            request.log.error({ s3_key: item.key, error: err.message }, "Instant variant generation failed");
+          }
+        }
+
+        // Always enqueue — even if posters/instant failed above.
+        await enqueueVideoJob(
+          { originalKey: item.key, relativePath: item.key.replace(/^originals\//, ""), story: storyMode },
+          request.log,
+        );
       }
 
       // Return only public ID with extension, without folder segments.
