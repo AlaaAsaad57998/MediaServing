@@ -347,7 +347,7 @@ async function processVideo(inputBuffer, params) {
       const level = isStoryDelivery ? "3.1" : "4.1";
       args.push(
         "-preset",
-        FFMPEG_X264_PRESET,
+        params.instantPreset || FFMPEG_X264_PRESET,
         "-tune",
         "fastdecode",
         "-profile:v",

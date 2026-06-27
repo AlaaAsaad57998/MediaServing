@@ -274,6 +274,32 @@ async function preprocessVideo(originalKey, relativePath, logger, opts = {}) {
   }
 }
 
+const INSTANT_VARIANT_TRANSFORM =
+  process.env.INSTANT_VARIANT_TRANSFORM ||
+  "w_720,h_1280,f_mp4,vc_h264,q_50,c_fit";
+const INSTANT_X264_PRESET = process.env.INSTANT_X264_PRESET || "ultrafast";
+
+function instantCacheKey(originalKey) {
+  const hash = crypto
+    .createHash("sha256")
+    .update(`${originalKey}|instant-mp4@v1|${INSTANT_VARIANT_TRANSFORM}`)
+    .digest("hex");
+  return `derived/${hash}/instant.mp4`;
+}
+
+function instantParams() {
+  const params = parseParams(INSTANT_VARIANT_TRANSFORM);
+  if (typeof params.q === "string" && params.q.startsWith("auto")) {
+    params.q = resolveQAuto(params.q);
+  }
+  params.instantPreset = INSTANT_X264_PRESET;
+  return params;
+}
+
+async function createInstantVariant(originalBuffer) {
+  return processVideo(originalBuffer, instantParams());
+}
+
 function getVariantUrls(relativePath) {
   return {
     full: `/video/upload/${relativePath}`,
@@ -289,9 +315,12 @@ module.exports = {
   getVariantUrls,
   snapshotCacheKey,
   webpCacheKey,
+  instantCacheKey,
   createWebpPosterVariant,
   previewParams,
   fullParams,
+  instantParams,
+  createInstantVariant,
   SNAPSHOT_SECOND,
   VIDEO_TRANSFORM_PRESETS,
 };
