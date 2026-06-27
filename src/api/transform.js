@@ -28,6 +28,7 @@ const {
   previewParams,
   fullParams,
   SNAPSHOT_SECOND,
+  instantCacheKey,
 } = require("../services/videoPreprocessor");
 const {
   storyVideoCacheKey,
@@ -35,12 +36,21 @@ const {
   storyFallbackVideoParams,
   storyVideoParams,
 } = require("../services/storyVideoService");
+const { enqueueVideoJob } = require("../services/videoQueue");
 
 function setMediaCacheHeaders(reply) {
   reply.header(
     "Cache-Control",
     process.env.MEDIA_CACHE_CONTROL ||
       "public, max-age=31536000, s-maxage=31536000, immutable",
+  );
+}
+
+function setPendingCacheHeaders(reply) {
+  reply.header(
+    "Cache-Control",
+    process.env.MEDIA_PENDING_CACHE_CONTROL ||
+      "public, max-age=5, must-revalidate",
   );
 }
 
@@ -127,7 +137,11 @@ function parseSingleRangeHeader(rangeHeader, totalLength) {
 
 function applyVideoBodyHeaders(reply, contentType, variantName, cacheStatus) {
   reply.header("Content-Type", contentType);
-  setMediaCacheHeaders(reply);
+  if (cacheStatus === "PENDING") {
+    setPendingCacheHeaders(reply);
+  } else {
+    setMediaCacheHeaders(reply);
+  }
   setVideoDeliveryHeaders(reply);
   reply.header("X-Video-Target", variantName);
   reply.header("X-Cache", cacheStatus);
@@ -595,6 +609,49 @@ async function transformRoutes(fastify) {
         videoTarget: variantName,
       });
       return reply.send(buffer);
+    }
+
+    // ── 1b. Video-byte targets: never transcode inline on cache miss ────
+    // Serve the instant normalized MP4 (if present) or the original as a
+    // playable fallback with a short TTL, and enqueue the polished job in
+    // the background. Only snapshot/webp (poster targets) fall through to
+    // the inline-transcode path below.
+    const VIDEO_BYTE_TARGETS = ["story", "story-fallback", "full", "preview"];
+    if (VIDEO_BYTE_TARGETS.includes(variantName)) {
+      const instantKey = instantCacheKey(originalKey);
+      const fallbackKey = (await checkCache(instantKey)) ? instantKey : originalKey;
+
+      // Warm the polished variant in the background (deduped by jobId).
+      enqueueVideoJob(
+        { originalKey, relativePath: filePath, story: variantName.startsWith("story") },
+        request.log,
+      );
+
+      let metadata;
+      try {
+        metadata = await getCacheMetadata(fallbackKey);
+      } catch (err) {
+        if (err.name === "NoSuchKey" || err.$metadata?.httpStatusCode === 404) {
+          stampLogExtra(request, { isVideo: true, filePath, cacheStatus: "NOT_FOUND", videoTarget: variantName });
+          return reply.code(404).send({ error: "Original file not found" });
+        }
+        throw err;
+      }
+      const totalLength = Number(metadata.contentLength || 0);
+      const range = parseSingleRangeHeader(request.headers.range, totalLength);
+      if (range.kind === "invalid" || range.kind === "unsatisfiable") {
+        reply.code(416);
+        setVideoDeliveryHeaders(reply);
+        reply.header("Content-Range", `bytes */${totalLength}`);
+        return reply.send({ error: "Requested range not satisfiable" });
+      }
+      const { buffer, contentType } = await getFromCache(fallbackKey, {
+        range: range.kind === "partial" ? range.storageRange : undefined,
+      });
+      stampLogExtra(request, { isVideo: true, filePath, cacheStatus: "PENDING", videoTarget: variantName });
+      return sendVideoBuffer(reply, {
+        buffer, contentType, variantName, cacheStatus: "PENDING", range, totalLength,
+      });
     }
 
     // ── 2. Acquire lock — prevent duplicate processing ──────────────────
