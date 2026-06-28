@@ -75,19 +75,36 @@ const WORKER_METRICS_ENABLED =
   process.env.WORKER_METRICS_DISABLED !== "true" &&
   process.env.WORKER_METRICS_DISABLED !== "1";
 
+// Name of the metric family a given exposition line belongs to ("" for blanks).
+function metricNameOf(line) {
+  if (line.startsWith("# HELP ") || line.startsWith("# TYPE ")) {
+    return line.split(" ")[2] || "";
+  }
+  if (line !== "" && line[0] !== "#") {
+    return line.split(/[ {]/)[0];
+  }
+  return "";
+}
+
 // Keep only `queue_*` metric families (HELP/TYPE lines + sample lines).
 function filterQueueFamilies(text) {
   const kept = [];
   for (const line of text.split("\n")) {
-    if (line.startsWith("# HELP ") || line.startsWith("# TYPE ")) {
-      const name = line.split(" ")[2] || "";
-      if (name.startsWith("queue_")) kept.push(line);
-    } else if (line !== "" && line[0] !== "#") {
-      const name = line.split(/[ {]/)[0];
-      if (name.startsWith("queue_")) kept.push(line);
-    }
+    if (metricNameOf(line).startsWith("queue_")) kept.push(line);
   }
   return kept.length ? kept.join("\n") + "\n" : "";
+}
+
+// Remove `queue_*` families from this process's own output. The app registers
+// these (it imports videoMetrics for fallbackServed) but never increments them,
+// so they'd sit at 0 AND collide with the worker's real values on merge. The
+// worker is the single source of truth for queue_*, so we drop the app's copies.
+function stripQueueFamilies(text) {
+  const kept = [];
+  for (const line of text.split("\n")) {
+    if (!metricNameOf(line).startsWith("queue_")) kept.push(line);
+  }
+  return kept.join("\n");
 }
 
 async function fetchWorkerQueueMetrics() {
@@ -140,7 +157,10 @@ function registerMetrics(app) {
         register.metrics(),
         fetchWorkerQueueMetrics(),
       ]);
-      return workerMetrics ? appMetrics + workerMetrics : appMetrics;
+      // Always drop the app's own (always-zero) queue_* families; the worker is
+      // the source of truth. When the worker is unreachable, queue_* is simply
+      // absent rather than reported as a misleading 0.
+      return stripQueueFamilies(appMetrics) + workerMetrics;
     },
   );
 }
@@ -149,5 +169,6 @@ module.exports = {
   registerMetrics,
   register,
   filterQueueFamilies,
+  stripQueueFamilies,
   fetchWorkerQueueMetrics,
 };
