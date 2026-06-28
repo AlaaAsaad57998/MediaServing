@@ -95,10 +95,11 @@ function filterQueueFamilies(text) {
   return kept.length ? kept.join("\n") + "\n" : "";
 }
 
-// Remove `queue_*` families from this process's own output. The app registers
-// these (it imports videoMetrics for fallbackServed) but never increments them,
-// so they'd sit at 0 AND collide with the worker's real values on merge. The
-// worker is the single source of truth for queue_*, so we drop the app's copies.
+// Remove `queue_*` families from this process's own output. The worker is the
+// single source of truth for queue_*; the app no longer imports videoMetrics so
+// it shouldn't register them, but this stays as defense-in-depth: if anything in
+// the app ever does, its always-zero copies would otherwise collide with the
+// worker's real values on merge (duplicate HELP/TYPE → rejected scrape).
 function stripQueueFamilies(text) {
   const kept = [];
   for (const line of text.split("\n")) {

@@ -24,13 +24,4 @@ const jobDuration = histogram({
   buckets: [1, 2, 5, 10, 20, 40, 80, 160],
 });
 
-// Custom delivery metric (lives in the `app` process): fallback responses
-// served while the polished variant is still warming. Not part of the
-// standard queue set, kept under its own name.
-const fallbackServed = counter({
-  name: "video_fallback_served_total",
-  help: "Fallback (pending) video responses served",
-  labelNames: ["kind"], // instant | original
-});
-
-module.exports = { jobsProcessed, jobsFailed, jobDuration, fallbackServed };
+module.exports = { jobsProcessed, jobsFailed, jobDuration };

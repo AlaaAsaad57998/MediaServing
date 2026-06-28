@@ -37,7 +37,6 @@ const {
   storyVideoParams,
 } = require("../services/storyVideoService");
 const { enqueueVideoJob } = require("../services/videoQueue");
-const { fallbackServed } = require("../services/videoMetrics");
 
 function setMediaCacheHeaders(reply) {
   reply.header(
@@ -659,7 +658,6 @@ async function transformRoutes(fastify) {
       const { buffer, contentType } = await getFromCache(fallbackKey, {
         range: range.kind === "partial" ? range.storageRange : undefined,
       });
-      fallbackServed.inc({ kind: fallbackKey === instantKey ? "instant" : "original" });
       stampLogExtra(request, { isVideo: true, filePath, cacheStatus: "PENDING", videoTarget: variantName });
       return sendVideoBuffer(reply, {
         buffer, contentType, variantName, cacheStatus: "PENDING", range, totalLength,
