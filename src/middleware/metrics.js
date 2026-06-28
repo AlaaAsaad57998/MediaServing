@@ -55,6 +55,55 @@ function resolveRoute(request) {
   return template || "__unmatched__";
 }
 
+// ── Worker metrics aggregation (Option B) ────────────────────────────────────
+// The polished-video jobs run in a SEPARATE `worker` process with its own
+// in-memory registry, so its queue_* counters are invisible to this process.
+// On scrape we fetch the worker's /metrics over the internal docker network and
+// merge ONLY the queue_* families — the worker's process_*/nodejs_* defaults are
+// dropped because they would collide with this process's identical names and
+// break the exposition. The fetch is a fast local call with a hard timeout and
+// can never fail the scrape (a down/unreachable worker just yields app metrics).
+const WORKER_METRICS_URL = (
+  process.env.WORKER_METRICS_URL || "http://worker:9091/metrics"
+).trim();
+const WORKER_METRICS_TIMEOUT_MS = Math.max(
+  50,
+  Number.parseInt(process.env.WORKER_METRICS_TIMEOUT_MS || "800", 10) || 800,
+);
+const WORKER_METRICS_ENABLED =
+  WORKER_METRICS_URL !== "" &&
+  process.env.WORKER_METRICS_DISABLED !== "true" &&
+  process.env.WORKER_METRICS_DISABLED !== "1";
+
+// Keep only `queue_*` metric families (HELP/TYPE lines + sample lines).
+function filterQueueFamilies(text) {
+  const kept = [];
+  for (const line of text.split("\n")) {
+    if (line.startsWith("# HELP ") || line.startsWith("# TYPE ")) {
+      const name = line.split(" ")[2] || "";
+      if (name.startsWith("queue_")) kept.push(line);
+    } else if (line !== "" && line[0] !== "#") {
+      const name = line.split(/[ {]/)[0];
+      if (name.startsWith("queue_")) kept.push(line);
+    }
+  }
+  return kept.length ? kept.join("\n") + "\n" : "";
+}
+
+async function fetchWorkerQueueMetrics() {
+  if (!WORKER_METRICS_ENABLED || typeof fetch !== "function") return "";
+  try {
+    const res = await fetch(WORKER_METRICS_URL, {
+      signal: AbortSignal.timeout(WORKER_METRICS_TIMEOUT_MS),
+    });
+    if (!res.ok) return "";
+    return filterQueueFamilies(await res.text());
+  } catch {
+    // Worker down/unreachable/slow — never break the app's scrape.
+    return "";
+  }
+}
+
 // Wire the timing hooks and the /metrics endpoint into a Fastify instance.
 function registerMetrics(app) {
   app.addHook("onRequest", (request, reply, done) => {
@@ -80,16 +129,25 @@ function registerMetrics(app) {
     done();
   });
 
-  // Scrape endpoint. Cheap by design: just serializes in-memory metrics — no
-  // DB queries, no external calls, no aggregation on scrape.
+  // Scrape endpoint. Serializes in-memory metrics (no DB/aggregation), then
+  // appends the worker's queue_* metrics fetched over the internal network.
   app.get(
     "/metrics",
     { config: { rateLimit: false } },
     async (_request, reply) => {
       reply.header("Content-Type", register.contentType);
-      return register.metrics();
+      const [appMetrics, workerMetrics] = await Promise.all([
+        register.metrics(),
+        fetchWorkerQueueMetrics(),
+      ]);
+      return workerMetrics ? appMetrics + workerMetrics : appMetrics;
     },
   );
 }
 
-module.exports = { registerMetrics, register };
+module.exports = {
+  registerMetrics,
+  register,
+  filterQueueFamilies,
+  fetchWorkerQueueMetrics,
+};

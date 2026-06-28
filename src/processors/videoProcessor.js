@@ -8,8 +8,12 @@ const { extractMediaInfo } = require("../utils/mediaProbe");
 
 const FFMPEG_BIN = process.env.FFMPEG_PATH || "ffmpeg";
 const FFPROBE_BIN = process.env.FFPROBE_PATH || "ffprobe";
-const FFMPEG_X264_PRESET = process.env.FFMPEG_X264_PRESET || "superfast";
-const FFMPEG_X265_PRESET = process.env.FFMPEG_X265_PRESET || "superfast";
+const FFMPEG_X264_PRESET = process.env.FFMPEG_X264_PRESET || "veryfast";
+const FFMPEG_X265_PRESET = process.env.FFMPEG_X265_PRESET || "veryfast";
+// Optional x264 -tune. Left empty by default: the old "fastdecode" tune only
+// speeds up DECODING (irrelevant on modern devices) while disabling CABAC, the
+// deblocking filter and weighted prediction — which visibly lowered quality.
+const FFMPEG_X264_TUNE = (process.env.FFMPEG_X264_TUNE || "").trim();
 const FFMPEG_VP9_DEADLINE = process.env.FFMPEG_VP9_DEADLINE || "realtime";
 const FFMPEG_VP9_CPU_USED = process.env.FFMPEG_VP9_CPU_USED || "6";
 const FFMPEG_THREADS = Math.max(
@@ -20,15 +24,21 @@ const VIDEO_FFMPEG_TIMEOUT_MS = Math.max(
   1000,
   Number.parseInt(process.env.VIDEO_FFMPEG_TIMEOUT_MS || "120000", 10) || 120000,
 );
-const STORY_MP4_MAXRATE = process.env.STORY_MP4_MAXRATE || "1000k";
-const STORY_MP4_BUFSIZE = process.env.STORY_MP4_BUFSIZE || "2000k";
-const STORY_MP4_AUDIO_BITRATE = process.env.STORY_MP4_AUDIO_BITRATE || "48k";
+// VBV bitrate ceilings. These cap the CRF rate-control; if set too low they
+// override CRF and starve the encoder on motion (the main cause of blocky
+// story/full output). Tuned to comfortable ceilings for each resolution.
+const STORY_MP4_MAXRATE = process.env.STORY_MP4_MAXRATE || "2500k";
+const STORY_MP4_BUFSIZE = process.env.STORY_MP4_BUFSIZE || "4000k";
+const STORY_MP4_AUDIO_BITRATE = process.env.STORY_MP4_AUDIO_BITRATE || "96k";
 const STORY_FALLBACK_MP4_MAXRATE =
-  process.env.STORY_FALLBACK_MP4_MAXRATE || "550k";
+  process.env.STORY_FALLBACK_MP4_MAXRATE || "1200k";
 const STORY_FALLBACK_MP4_BUFSIZE =
-  process.env.STORY_FALLBACK_MP4_BUFSIZE || "1100k";
+  process.env.STORY_FALLBACK_MP4_BUFSIZE || "2400k";
 const STORY_FALLBACK_MP4_AUDIO_BITRATE =
-  process.env.STORY_FALLBACK_MP4_AUDIO_BITRATE || "40k";
+  process.env.STORY_FALLBACK_MP4_AUDIO_BITRATE || "64k";
+// Ceilings for the non-story full/preview variants.
+const FULL_MP4_MAXRATE = process.env.FULL_MP4_MAXRATE || "4500k";
+const FULL_MP4_BUFSIZE = process.env.FULL_MP4_BUFSIZE || "9000k";
 // ── helpers ────────────────────────────────────────────────────────────────
 
 function tmpPath(ext) {
@@ -337,19 +347,17 @@ async function processVideo(inputBuffer, params) {
         ? isStoryFallbackDelivery
           ? STORY_FALLBACK_MP4_MAXRATE
           : STORY_MP4_MAXRATE
-        : "2500k";
+        : FULL_MP4_MAXRATE;
       const bufSize = isStoryDelivery
         ? isStoryFallbackDelivery
           ? STORY_FALLBACK_MP4_BUFSIZE
           : STORY_MP4_BUFSIZE
-        : "5000k";
+        : FULL_MP4_BUFSIZE;
       const profile = isStoryDelivery ? "main" : "high";
       const level = isStoryDelivery ? "3.1" : "4.1";
       args.push(
         "-preset",
         params.instantPreset || FFMPEG_X264_PRESET,
-        "-tune",
-        "fastdecode",
         "-profile:v",
         profile,
         "-level",
@@ -363,6 +371,12 @@ async function processVideo(inputBuffer, params) {
         "-bufsize",
         bufSize,
       );
+
+      // Only apply a -tune when explicitly configured. Default = none, so we
+      // keep CABAC + deblocking for the best quality at a given bitrate.
+      if (FFMPEG_X264_TUNE) {
+        args.push("-tune", FFMPEG_X264_TUNE);
+      }
 
       if (isStoryDelivery) {
         // Story playback benefits from stable frame cadence and frequent keyframes.

@@ -4,3 +4,9 @@ node_modules/
 plan.md
 USAGE_IN_CLIENTS_SITE.tsx
 
+
+.env.production
+Application Metrics Standard.md
+docs/شرح-المقاييس-بالعربي.md
+docs/تحليل-مقاييس-الإنتاج-الحية.md
+.superpowers/sdd/progress.md
